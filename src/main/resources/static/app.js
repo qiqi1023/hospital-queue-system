@@ -5,11 +5,11 @@ const API = {
 };
 
 const DEPARTMENT_LOGOS = {
-	GEN: "/assets/departments/general-consult-logo.png?v=20260530-2",
-	PHA: "/assets/departments/pharmacy-logo.png?v=20260530-2",
-	DEN: "/assets/departments/dental-logo.png?v=20260530-2",
-	LAB: "/assets/departments/blood-test-logo.png?v=20260530-2",
-	SPC: "/assets/departments/specialist-logo.png?v=20260530-2"
+	GEN: "/assets/departments/general-consult-logo.png?v=20260530-3",
+	PHA: "/assets/departments/pharmacy-logo.png?v=20260530-3",
+	DEN: "/assets/departments/dental-logo.png?v=20260530-3",
+	LAB: "/assets/departments/blood-test-logo.png?v=20260530-3",
+	SPC: "/assets/departments/specialist-logo.png?v=20260530-3"
 };
 
 const elements = {
@@ -26,6 +26,7 @@ const elements = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+	document.body.classList.add("is-ready");
 	bindTabs();
 	bindForms();
 	startClock();
@@ -64,6 +65,7 @@ function bindForms() {
 			});
 			renderTicketResult(ticket);
 			elements.queueForm.reset();
+			renderDepartmentPreview(null);
 			showToast(`Queue number ${ticket.queueNumber} created.`, "success");
 			loadCurrentQueues();
 		}
@@ -123,8 +125,8 @@ async function loadDepartments() {
 			renderDepartmentPreview(selected);
 		});
 
-		elements.quotaSummary.innerHTML = departments.map((department) =>
-			`<li class="quota-item">
+		elements.quotaSummary.innerHTML = departments.map((department, index) =>
+			`<li class="quota-item" style="--row-index: ${index}">
 				<img src="${departmentLogo(department.code)}" alt="" loading="lazy">
 				<span>${escapeHtml(department.name)}: ${department.dailyQuota} slots daily</span>
 			</li>`
@@ -138,8 +140,8 @@ async function loadDepartments() {
 async function loadCurrentQueues() {
 	try {
 		const queues = await requestJson(API.currentQueues);
-		elements.currentQueueList.innerHTML = queues.map((queue) => `
-			<div class="queue-row">
+		elements.currentQueueList.innerHTML = queues.map((queue, index) => `
+			<div class="queue-row" style="--row-index: ${index}">
 				<img class="dept-logo" src="${departmentLogo(queue.departmentCode)}" alt="${escapeHtml(queue.departmentName)} logo" loading="lazy">
 				<div>
 					<h3>${escapeHtml(queue.departmentName)}</h3>
@@ -233,7 +235,7 @@ function renderDepartmentPreview(department) {
 }
 
 function departmentLogo(code) {
-	return DEPARTMENT_LOGOS[code] || "/assets/hospital-logo.png?v=20260530-2";
+	return DEPARTMENT_LOGOS[code] || "/assets/hospital-logo.png?v=20260530-3";
 }
 
 function detailItem(label, value) {
