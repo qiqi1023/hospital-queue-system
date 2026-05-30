@@ -3,6 +3,7 @@ package com.hospital.queue.service;
 import com.hospital.queue.constant.QueueRules;
 import com.hospital.queue.constant.ResponseMessages;
 import com.hospital.queue.domain.Department;
+import com.hospital.queue.domain.PriorityCategory;
 import com.hospital.queue.domain.QueueStatus;
 import com.hospital.queue.domain.QueueTicket;
 import com.hospital.queue.dto.CallNextRequest;
@@ -25,6 +26,10 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class QueueService {
+	private static final Comparator<QueueTicket> QUEUE_ORDER = Comparator
+		.comparingInt((QueueTicket ticket) -> ticket.getPriorityCategory() == PriorityCategory.PRIORITY ? 0 : 1)
+		.thenComparing(QueueTicket::getId);
+
 	private final Clock clock;
 	private final AtomicLong idSequence = new AtomicLong(QueueRules.INITIAL_TICKET_ID);
 	private final List<QueueTicket> tickets = new ArrayList<>();
@@ -100,7 +105,7 @@ public class QueueService {
 		QueueTicket ticket = tickets.stream()
 			.filter(candidate -> candidate.getDepartment() == department)
 			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
-			.min(Comparator.comparing(QueueTicket::getId))
+			.min(QUEUE_ORDER)
 			.orElseThrow(() -> new BusinessRuleException(
 				HttpStatus.NOT_FOUND,
 				ResponseMessages.NO_WAITING_TICKET.formatted(department.getDisplayName())
@@ -218,7 +223,7 @@ public class QueueService {
 		return (int) tickets.stream()
 			.filter(candidate -> candidate.getDepartment() == ticket.getDepartment())
 			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
-			.filter(candidate -> candidate.getId() < ticket.getId())
+			.filter(candidate -> QUEUE_ORDER.compare(candidate, ticket) < 0)
 			.count();
 	}
 

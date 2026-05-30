@@ -21,10 +21,12 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
 class QueueControllerTests {
 	@Autowired
 	private MockMvc mockMvc;
@@ -119,6 +121,58 @@ class QueueControllerTests {
 			.andExpect(jsonPath("$.status", is("CALLED")))
 			.andExpect(jsonPath("$.counterName", is("Counter 2")))
 			.andExpect(jsonPath("$.calledAt", is("2026-05-30T09:00:00")));
+	}
+
+	@Test
+	void callNextReturnsPriorityTicketBeforeNormalTicket() throws Exception {
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Lim Wei Han",
+						"icNumber": "060708-06-3333",
+						"phoneNumber": "016-333 4444",
+						"departmentCode": "LAB",
+						"visitReason": "Blood test",
+						"priorityCategory": "NORMAL"
+					}
+					"""))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("LAB001")))
+			.andExpect(jsonPath("$.peopleAhead", is(0)));
+
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Mariam binti Hassan",
+						"icNumber": "070809-07-4444",
+						"phoneNumber": "017-444 5555",
+						"departmentCode": "LAB",
+						"visitReason": "Blood test",
+						"priorityCategory": "PRIORITY"
+					}
+					"""))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("LAB002")))
+			.andExpect(jsonPath("$.peopleAhead", is(0)));
+
+		mockMvc.perform(get("/api/queues/LAB001"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.peopleAhead", is(1)));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "LAB",
+						"counterName": "Counter 2"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("LAB002")))
+			.andExpect(jsonPath("$.priorityCategory", is("PRIORITY")))
+			.andExpect(jsonPath("$.status", is("CALLED")));
 	}
 
 	@Test
