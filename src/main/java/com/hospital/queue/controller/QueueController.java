@@ -1,14 +1,17 @@
 package com.hospital.queue.controller;
 
 import com.hospital.queue.constant.ApiRoutes;
+import com.hospital.queue.dto.CallNextRequest;
 import com.hospital.queue.dto.QueueTicketResponse;
 import com.hospital.queue.dto.TakeQueueRequest;
+import com.hospital.queue.dto.UpdateTicketStatusRequest;
 import com.hospital.queue.service.QueueService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -27,6 +30,18 @@ public class QueueController {
 	@ResponseStatus(HttpStatus.CREATED)
 	public QueueTicketResponse takeQueue(@Valid @RequestBody TakeQueueRequest request) {
 		return queueService.takeQueue(request);
+	}
+
+	@PutMapping(ApiRoutes.NEXT_CALL)
+	public QueueTicketResponse callNext(@Valid @RequestBody CallNextRequest request) {
+		return queueService.callNext(request);
+	}
+
+	@PutMapping(ApiRoutes.QUEUE_NUMBER_PATH + ApiRoutes.STATUS)
+	public QueueTicketResponse updateStatus(
+			@PathVariable String queueNumber,
+			@Valid @RequestBody UpdateTicketStatusRequest request) {
+		return queueService.updateStatus(queueNumber, request);
 	}
 
 	@GetMapping(ApiRoutes.QUEUE_NUMBER_PATH)

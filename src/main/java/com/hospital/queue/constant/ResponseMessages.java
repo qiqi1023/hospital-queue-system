@@ -8,6 +8,9 @@ public final class ResponseMessages {
 	public static final String DAILY_QUOTA_FULL = "Daily quota for %s is full.";
 	public static final String DUPLICATE_ACTIVE_IC = "IC number already has an active ticket for %s: %s";
 	public static final String REQUEST_VALIDATION_FAILED = "Request validation failed.";
+	public static final String LUNCH_BREAK_CALLING_PAUSED = "Queue calling is paused during lunch break from 12:00 PM to 2:00 PM.";
+	public static final String NO_WAITING_TICKET = "No waiting ticket found for %s.";
+	public static final String STATUS_UPDATED = "Ticket status updated successfully.";
 
 	private ResponseMessages() {
 	}

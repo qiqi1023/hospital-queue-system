@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -86,6 +87,78 @@ class QueueControllerTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.patientName", is("Tan Mei Ling")))
 			.andExpect(jsonPath("$.priorityCategory", is("PRIORITY")));
+	}
+
+	@Test
+	void callNextReturnsEarliestWaitingTicketAndAssignsCounter() throws Exception {
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Ahmad Firdaus",
+						"icNumber": "040506-04-1111",
+						"phoneNumber": "014-111 2222",
+						"departmentCode": "LAB",
+						"visitReason": "Blood test",
+						"priorityCategory": "NORMAL"
+					}
+					"""))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("LAB001")));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "LAB",
+						"counterName": "Counter 2"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("LAB001")))
+			.andExpect(jsonPath("$.status", is("CALLED")))
+			.andExpect(jsonPath("$.counterName", is("Counter 2")))
+			.andExpect(jsonPath("$.calledAt", is("2026-05-30T09:00:00")));
+	}
+
+	@Test
+	void updateStatusMarksCalledTicketAsCompleted() throws Exception {
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Siti Aminah",
+						"icNumber": "050607-05-2222",
+						"phoneNumber": "015-333 4444",
+						"departmentCode": "SPC",
+						"visitReason": "Specialist follow-up",
+						"priorityCategory": "NORMAL"
+					}
+					"""))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("SPC001")));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "SPC",
+						"counterName": "Counter 4"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status", is("CALLED")));
+
+		mockMvc.perform(put("/api/queues/SPC001/status")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"status": "COMPLETED"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status", is("COMPLETED")))
+			.andExpect(jsonPath("$.completedAt", is("2026-05-30T09:00:00")));
 	}
 
 	@Test

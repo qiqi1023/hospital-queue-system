@@ -93,6 +93,7 @@ function bindForms() {
 			showToast(error.message, "error");
 		}
 	});
+
 }
 
 function startClock() {
@@ -113,12 +114,13 @@ function updateClock() {
 async function loadDepartments() {
 	try {
 		const departments = await requestJson(API.departments);
-		elements.departmentSelect.innerHTML = [
+		const departmentOptions = [
 			`<option value="">Select department</option>`,
 			...departments.map((department) =>
 				`<option value="${department.code}">${escapeHtml(department.name)} (${department.code})</option>`
 			)
 		].join("");
+		elements.departmentSelect.innerHTML = departmentOptions;
 
 		elements.departmentSelect.addEventListener("change", () => {
 			const selected = departments.find((department) => department.code === elements.departmentSelect.value);

@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Smart Hospital Queue</title>
-	<link rel="stylesheet" href="/styles.css?v=20260530-3">
+	<link rel="stylesheet" href="/styles.css?v=20260530-5">
 </head>
 <body>
 	<div class="topbar" aria-label="Hospital queue status">
@@ -22,6 +22,7 @@
 			<span id="clock">--:--</span>
 			<span class="status-dot"></span>
 			<span>Customer Queue</span>
+			<a class="portal-link" href="/staff">Staff Portal</a>
 		</div>
 	</header>
 
@@ -105,6 +106,7 @@
 				</div>
 				<div id="current-queue-list" class="queue-list" aria-live="polite"></div>
 			</section>
+
 		</section>
 
 		<aside class="side-panel" aria-label="Queue information">
@@ -126,6 +128,6 @@
 	</main>
 
 	<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-	<script src="/app.js?v=20260530-3" defer></script>
+	<script src="/app.js?v=20260530-5" defer></script>
 </body>
 </html>

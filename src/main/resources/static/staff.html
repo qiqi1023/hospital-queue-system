@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Smart Hospital Queue · Staff Portal</title>
+	<link rel="stylesheet" href="/styles.css?v=20260530-6">
+</head>
+<body>
+	<div class="topbar" aria-label="Hospital queue status">
+		<span>Smart Queue · Public Hospital Malaysia</span>
+		<span>Staff Portal · Queue calling pauses from 12:00 PM to 2:00 PM</span>
+	</div>
+
+	<header class="app-header">
+		<img class="brand-logo" src="/assets/hospital-logo.png?v=20260530-3" alt="Public Hospital Malaysia logo">
+		<div class="brand-copy">
+			<p class="eyebrow">Hospital Awam Malaysia</p>
+			<h1>Staff Queue Portal</h1>
+		</div>
+		<div class="header-status">
+			<span id="clock">--:--</span>
+			<span class="status-dot"></span>
+			<span>Hospital Staff</span>
+			<a class="portal-link" href="/">Patient Page</a>
+		</div>
+	</header>
+
+	<main class="layout">
+		<section class="queue-workspace" aria-label="Staff queue functions">
+			<nav class="tabs" aria-label="Staff queue functions">
+				<button class="tab-button active" type="button" data-staff-tab="call-next">Call Next Patient</button>
+				<button class="tab-button" type="button" data-staff-tab="update-status">Update Ticket Status</button>
+			</nav>
+
+			<section id="call-next-panel" class="tab-panel active" data-staff-panel="call-next" aria-labelledby="call-next-heading">
+				<div class="section-heading">
+					<h2 id="call-next-heading">Call Patient and Assign Counter</h2>
+					<p>Call the earliest waiting ticket for a department and assign the service counter.</p>
+				</div>
+
+				<form id="staff-call-form" class="form-grid">
+					<label>
+						<span>Department</span>
+						<select name="departmentCode" id="staff-department-select" required>
+							<option value="">Select department</option>
+						</select>
+					</label>
+					<label>
+						<span>Counter Name</span>
+						<input name="counterName" type="text" placeholder="Counter 2" maxlength="80" required>
+					</label>
+					<button class="primary-action full" type="submit">Call Patient</button>
+				</form>
+
+				<article id="staff-call-result" class="ticket-detail" hidden aria-live="polite"></article>
+			</section>
+
+			<section id="update-status-panel" class="tab-panel" data-staff-panel="update-status" aria-labelledby="update-status-heading">
+				<div class="section-heading">
+					<h2 id="update-status-heading">Update Ticket Status</h2>
+					<p>Update a ticket to serving, completed, missed, cancelled, called, or waiting according to the hospital workflow.</p>
+				</div>
+
+				<form id="status-update-form" class="form-grid">
+					<label>
+						<span>Queue Number</span>
+						<input name="queueNumber" type="text" placeholder="GEN001" maxlength="20" required>
+					</label>
+					<label>
+						<span>New Status</span>
+						<select name="status" required>
+							<option value="">Select status</option>
+							<option value="WAITING">WAITING</option>
+							<option value="CALLED">CALLED</option>
+							<option value="SERVING">SERVING</option>
+							<option value="COMPLETED">COMPLETED</option>
+							<option value="MISSED">MISSED</option>
+							<option value="CANCELLED">CANCELLED</option>
+						</select>
+					</label>
+					<button class="primary-action full" type="submit">Update Status</button>
+				</form>
+
+				<article id="status-update-result" class="ticket-detail" hidden aria-live="polite"></article>
+			</section>
+		</section>
+
+		<aside class="side-panel" aria-label="Current queues">
+			<section class="info-block">
+				<h2>Current Queues</h2>
+				<p class="muted-copy">The list refreshes after each successful call or status update.</p>
+				<div id="current-queue-list" class="queue-list compact-queue-list" aria-live="polite"></div>
+			</section>
+		</aside>
+	</main>
+
+	<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+	<script src="/staff.js?v=20260530-6" defer></script>
+</body>
+</html>

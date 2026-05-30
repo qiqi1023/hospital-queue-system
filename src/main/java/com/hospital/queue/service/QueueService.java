@@ -5,10 +5,12 @@ import com.hospital.queue.constant.ResponseMessages;
 import com.hospital.queue.domain.Department;
 import com.hospital.queue.domain.QueueStatus;
 import com.hospital.queue.domain.QueueTicket;
+import com.hospital.queue.dto.CallNextRequest;
 import com.hospital.queue.dto.CurrentQueueResponse;
 import com.hospital.queue.dto.DepartmentResponse;
 import com.hospital.queue.dto.QueueTicketResponse;
 import com.hospital.queue.dto.TakeQueueRequest;
+import com.hospital.queue.dto.UpdateTicketStatusRequest;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -73,11 +75,41 @@ public class QueueService {
 
 	public synchronized QueueTicketResponse getTicket(String queueNumber) {
 		resetIfNewDay();
-		return tickets.stream()
-			.filter(ticket -> ticket.getQueueNumber().equalsIgnoreCase(queueNumber))
-			.findFirst()
-			.map(this::toResponse)
-			.orElseThrow(() -> new BusinessRuleException(HttpStatus.NOT_FOUND, ResponseMessages.QUEUE_NUMBER_NOT_FOUND));
+		return toResponse(findTicket(queueNumber));
+	}
+
+	public synchronized QueueTicketResponse updateStatus(String queueNumber, UpdateTicketStatusRequest request) {
+		resetIfNewDay();
+		QueueTicket ticket = findTicket(queueNumber);
+		LocalDateTime now = LocalDateTime.now(clock);
+
+		ticket.setStatus(request.status());
+		if (request.status() == QueueStatus.COMPLETED) {
+			ticket.setCompletedAt(now);
+		}
+
+		return toResponse(ticket);
+	}
+
+	public synchronized QueueTicketResponse callNext(CallNextRequest request) {
+		resetIfNewDay();
+		LocalDateTime now = LocalDateTime.now(clock);
+		validateNotLunchBreak(now);
+
+		Department department = parseDepartment(request.departmentCode());
+		QueueTicket ticket = tickets.stream()
+			.filter(candidate -> candidate.getDepartment() == department)
+			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
+			.min(Comparator.comparing(QueueTicket::getId))
+			.orElseThrow(() -> new BusinessRuleException(
+				HttpStatus.NOT_FOUND,
+				ResponseMessages.NO_WAITING_TICKET.formatted(department.getDisplayName())
+			));
+
+		ticket.setStatus(QueueStatus.CALLED);
+		ticket.setCounterName(request.counterName().trim());
+		ticket.setCalledAt(now);
+		return toResponse(ticket);
 	}
 
 	public synchronized List<DepartmentResponse> getDepartments() {
@@ -104,6 +136,13 @@ public class QueueService {
 			.toList();
 	}
 
+	private QueueTicket findTicket(String queueNumber) {
+		return tickets.stream()
+			.filter(ticket -> ticket.getQueueNumber().equalsIgnoreCase(queueNumber))
+			.findFirst()
+			.orElseThrow(() -> new BusinessRuleException(HttpStatus.NOT_FOUND, ResponseMessages.QUEUE_NUMBER_NOT_FOUND));
+	}
+
 	private Department parseDepartment(String departmentCode) {
 		try {
 			return Department.fromCode(departmentCode.trim());
@@ -119,6 +158,13 @@ public class QueueService {
 			throw new BusinessRuleException(HttpStatus.BAD_REQUEST, ResponseMessages.INVALID_IC_NUMBER);
 		}
 		return normalized;
+	}
+
+	private void validateNotLunchBreak(LocalDateTime now) {
+		if (!now.toLocalTime().isBefore(QueueRules.LUNCH_BREAK_START_TIME)
+				&& now.toLocalTime().isBefore(QueueRules.LUNCH_BREAK_END_TIME)) {
+			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.LUNCH_BREAK_CALLING_PAUSED);
+		}
 	}
 
 	private void validateDailyQuota(Department department) {
