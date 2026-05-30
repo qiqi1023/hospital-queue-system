@@ -3,6 +3,7 @@ package com.hospital.queue.dto;
 import com.hospital.queue.domain.PriorityCategory;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record TakeQueueRequest(
@@ -14,6 +15,7 @@ public record TakeQueueRequest(
 		String icNumber,
 
 		@NotBlank(message = "Phone number is required")
+		@Pattern(regexp = "01[0-9]-[0-9]{7,8}", message = "Phone number must be a valid Malaysian mobile number, for example 012-3456789")
 		@Size(max = 30, message = "Phone number must be 30 characters or fewer")
 		String phoneNumber,
 

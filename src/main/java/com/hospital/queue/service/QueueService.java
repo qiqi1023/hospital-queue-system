@@ -50,6 +50,9 @@ public class QueueService {
 		if (now.toLocalTime().isBefore(QueueRules.QUEUE_OPEN_TIME)) {
 			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.QUEUE_NOT_OPEN);
 		}
+		if (!now.toLocalTime().isBefore(QueueRules.QUEUE_CLOSE_TIME)) {
+			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.QUEUE_CLOSED);
+		}
 
 		Department department = parseDepartment(request.departmentCode());
 		String normalizedIc = normalizeIc(request.icNumber());
@@ -88,6 +91,7 @@ public class QueueService {
 		QueueTicket ticket = findTicket(queueNumber);
 		LocalDateTime now = LocalDateTime.now(clock);
 
+		validateStatusTransition(ticket.getStatus(), request.status());
 		ticket.setStatus(request.status());
 		if (request.status() == QueueStatus.COMPLETED) {
 			ticket.setCompletedAt(now);
@@ -199,6 +203,15 @@ public class QueueService {
 			});
 	}
 
+	private void validateStatusTransition(QueueStatus currentStatus, QueueStatus requestedStatus) {
+		if (!QueueRules.VALID_STATUS_TRANSITIONS.getOrDefault(currentStatus, java.util.Set.of()).contains(requestedStatus)) {
+			throw new BusinessRuleException(
+				HttpStatus.CONFLICT,
+				ResponseMessages.INVALID_STATUS_TRANSITION.formatted(currentStatus, requestedStatus)
+			);
+		}
+	}
+
 	private QueueTicketResponse toResponse(QueueTicket ticket) {
 		return new QueueTicketResponse(
 			ticket.getQueueNumber(),
@@ -246,6 +259,7 @@ public class QueueService {
 	private int usedSlots(Department department) {
 		return (int) tickets.stream()
 			.filter(ticket -> ticket.getDepartment() == department)
+			.filter(ticket -> QueueRules.QUOTA_COUNTED_STATUSES.contains(ticket.getStatus()))
 			.count();
 	}
 

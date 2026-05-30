@@ -10,8 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.hospital.queue.constant.QueueRules;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +25,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -31,19 +34,42 @@ class QueueControllerTests {
 	@Autowired
 	private MockMvc mockMvc;
 
+	@Autowired
+	private MutableQueueClock queueClock;
+
 	@TestConfiguration
 	static class FixedClockConfig {
 		@Bean
 		@Primary
-		Clock fixedQueueClock() {
-			return Clock.fixed(
-				ZonedDateTime.of(
-					LocalDate.of(2026, 5, 30),
-					LocalTime.of(9, 0),
-					QueueRules.MALAYSIA_ZONE
-				).toInstant(),
-				QueueRules.MALAYSIA_ZONE
-			);
+		MutableQueueClock fixedQueueClock() {
+			return new MutableQueueClock(LocalTime.of(9, 0));
+		}
+	}
+
+	static class MutableQueueClock extends Clock {
+		private Instant instant;
+
+		MutableQueueClock(LocalTime time) {
+			setTime(time);
+		}
+
+		void setTime(LocalTime time) {
+			this.instant = ZonedDateTime.of(LocalDate.of(2026, 5, 30), time, QueueRules.MALAYSIA_ZONE).toInstant();
+		}
+
+		@Override
+		public ZoneId getZone() {
+			return QueueRules.MALAYSIA_ZONE;
+		}
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return Clock.fixed(instant, zone);
+		}
+
+		@Override
+		public Instant instant() {
+			return instant;
 		}
 	}
 
@@ -55,7 +81,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Nur Aisyah binti Ahmad",
 						"icNumber": "010203-01-1234",
-						"phoneNumber": "011-2345 6789",
+						"phoneNumber": "011-23456789",
 						"departmentCode": "GEN",
 						"visitReason": "Fever and cough",
 						"priorityCategory": "NORMAL"
@@ -76,7 +102,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Tan Mei Ling",
 						"icNumber": "020304-02-5678",
-						"phoneNumber": "012-345 6789",
+						"phoneNumber": "012-3456789",
 						"departmentCode": "PHA",
 						"visitReason": "Collect medicine",
 						"priorityCategory": "PRIORITY"
@@ -99,7 +125,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Ahmad Firdaus",
 						"icNumber": "040506-04-1111",
-						"phoneNumber": "014-111 2222",
+						"phoneNumber": "014-1112222",
 						"departmentCode": "LAB",
 						"visitReason": "Blood test",
 						"priorityCategory": "NORMAL"
@@ -131,7 +157,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Lim Wei Han",
 						"icNumber": "060708-06-3333",
-						"phoneNumber": "016-333 4444",
+						"phoneNumber": "016-3334444",
 						"departmentCode": "LAB",
 						"visitReason": "Blood test",
 						"priorityCategory": "NORMAL"
@@ -147,7 +173,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Mariam binti Hassan",
 						"icNumber": "070809-07-4444",
-						"phoneNumber": "017-444 5555",
+						"phoneNumber": "017-4445555",
 						"departmentCode": "LAB",
 						"visitReason": "Blood test",
 						"priorityCategory": "PRIORITY"
@@ -183,7 +209,7 @@ class QueueControllerTests {
 					{
 						"patientName": "Siti Aminah",
 						"icNumber": "050607-05-2222",
-						"phoneNumber": "015-333 4444",
+						"phoneNumber": "015-3334444",
 						"departmentCode": "SPC",
 						"visitReason": "Specialist follow-up",
 						"priorityCategory": "NORMAL"
@@ -221,7 +247,7 @@ class QueueControllerTests {
 			{
 				"patientName": "Ravi Kumar",
 				"icNumber": "030405-03-9999",
-				"phoneNumber": "013-222 3333",
+				"phoneNumber": "013-2223333",
 				"departmentCode": "DEN",
 				"visitReason": "Tooth pain",
 				"priorityCategory": "NORMAL"
@@ -238,5 +264,117 @@ class QueueControllerTests {
 				.content(requestBody))
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.message", containsString("already has an active ticket")));
+	}
+
+	@Test
+	void cancelledAndMissedTicketsDoNotUseDailyQuota() throws Exception {
+		takeQueue("DEN", "010101010001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("DEN001")));
+		updateTicketStatus("DEN001", "CANCELLED")
+			.andExpect(status().isOk());
+
+		takeQueue("DEN", "010101010002", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("DEN002")));
+		updateTicketStatus("DEN002", "MISSED")
+			.andExpect(status().isOk());
+
+		for (int index = 3; index <= 42; index++) {
+			takeQueue("DEN", "01010101%04d".formatted(index), "NORMAL")
+				.andExpect(status().isCreated());
+		}
+
+		takeQueue("DEN", "010101010043", "NORMAL")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", containsString("Daily quota for Dental Clinic is full")));
+	}
+
+	@Test
+	void invalidStatusTransitionsAreRejected() throws Exception {
+		takeQueue("GEN", "020202020001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("GEN001")));
+
+		updateTicketStatus("GEN001", "CANCELLED")
+			.andExpect(status().isOk());
+
+		updateTicketStatus("GEN001", "SERVING")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", is("Ticket status cannot be changed from CANCELLED to SERVING.")));
+
+		takeQueue("GEN", "020202020002", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("GEN002")));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("GEN002")));
+
+		updateTicketStatus("GEN002", "COMPLETED")
+			.andExpect(status().isOk());
+
+		updateTicketStatus("GEN002", "WAITING")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", is("Ticket status cannot be changed from COMPLETED to WAITING.")));
+	}
+
+	@Test
+	void takeQueueAfterCloseTimeIsRejected() throws Exception {
+		queueClock.setTime(LocalTime.of(23, 59));
+
+		takeQueue("GEN", "030303030001", "NORMAL")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", is("Online queue closes daily at 10:00 PM.")));
+	}
+
+	@Test
+	void invalidMalaysianMobileNumberIsRejected() throws Exception {
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Invalid Phone",
+						"icNumber": "040404040001",
+						"phoneNumber": "hello-phone",
+						"departmentCode": "GEN",
+						"visitReason": "General check",
+						"priorityCategory": "NORMAL"
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.validationErrors.phoneNumber", containsString("valid Malaysian mobile number")));
+	}
+
+	private ResultActions takeQueue(String departmentCode, String icNumber, String priorityCategory) throws Exception {
+		return mockMvc.perform(post("/api/queues")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{
+					"patientName": "Test Patient %s",
+					"icNumber": "%s",
+					"phoneNumber": "012-3456789",
+					"departmentCode": "%s",
+					"visitReason": "General check",
+					"priorityCategory": "%s"
+				}
+				""".formatted(icNumber, icNumber, departmentCode, priorityCategory)));
+	}
+
+	private ResultActions updateTicketStatus(String queueNumber, String status) throws Exception {
+		return mockMvc.perform(put("/api/queues/%s/status".formatted(queueNumber))
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{
+					"status": "%s"
+				}
+				""".formatted(status)));
 	}
 }
