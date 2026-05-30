@@ -182,6 +182,7 @@ async function loadCurrentQueues() {
 				<div>
 					<h3>${escapeHtml(queue.departmentName)}</h3>
 					<p>${queue.waitingCount} waiting · ${queue.usedSlots}/${queue.dailyQuota} slots used</p>
+					<p>${queue.currentQueueNumber ? `${escapeHtml(queue.counterName || "Unassigned Counter")} · ${escapeHtml(queue.serviceStatus || "-")}` : "No active service"}</p>
 				</div>
 				<div class="current-number">${queue.currentQueueNumber || "-"}</div>
 			</div>

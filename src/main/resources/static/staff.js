@@ -1,9 +1,31 @@
 const API = {
 	departments: "/api/departments",
 	currentQueues: "/api/departments/current-queues",
+	currentServices: "/api/queues/current-services",
 	queues: "/api/queues",
+	ticket: (queueNumber) => `/api/queues/${encodeURIComponent(queueNumber)}`,
 	nextCall: "/api/queues/next-call",
 	updateStatus: (queueNumber) => `/api/queues/${encodeURIComponent(queueNumber)}/status`
+};
+
+const DEFAULT_COUNTERS = ["Counter 1", "Counter 2", "Counter 3", "Counter 4", "Counter 5"];
+
+const VALID_STATUS_ACTIONS = {
+	WAITING: [
+		{ status: "CANCELLED", label: "Cancel Ticket", danger: true }
+	],
+	CALLED: [
+		{ status: "SERVING", label: "Start Serving" },
+		{ status: "COMPLETED", label: "Mark Completed" },
+		{ status: "MISSED", label: "Mark Missed", danger: true },
+		{ status: "CANCELLED", label: "Cancel Ticket", danger: true }
+	],
+	SERVING: [
+		{ status: "COMPLETED", label: "Mark Completed" }
+	],
+	COMPLETED: [],
+	MISSED: [],
+	CANCELLED: []
 };
 
 const DEPARTMENT_LOGOS = {
@@ -18,14 +40,16 @@ const elements = {
 	clock: document.querySelector("#clock"),
 	tabButtons: document.querySelectorAll("[data-staff-tab]"),
 	tabPanels: document.querySelectorAll("[data-staff-panel]"),
-	staffDepartmentSelect: document.querySelector("#staff-department-select"),
 	staffCallForm: document.querySelector("#staff-call-form"),
 	staffCallResult: document.querySelector("#staff-call-result"),
-	statusUpdateForm: document.querySelector("#status-update-form"),
+	staffCounterSelect: document.querySelector("#staff-counter-select"),
+	statusLookupForm: document.querySelector("#status-lookup-form"),
 	statusUpdateResult: document.querySelector("#status-update-result"),
+	statusActionPanel: document.querySelector("#status-action-panel"),
 	queueListForm: document.querySelector("#queue-list-form"),
 	staffTicketList: document.querySelector("#staff-ticket-list"),
 	currentQueueList: document.querySelector("#current-queue-list"),
+	counterServiceBoard: document.querySelector("#counter-service-board"),
 	toast: document.querySelector("#toast")
 };
 
@@ -33,12 +57,13 @@ document.addEventListener("DOMContentLoaded", () => {
 	document.body.classList.add("is-ready");
 	bindStaffTabs();
 	bindStaffCallForm();
-	bindStatusUpdateForm();
+	bindStatusLookupForm();
+	bindStatusWorkflowActions();
 	bindQueueListForm();
-	bindQuickStatusActions();
 	startClock();
 	loadDepartments();
-	loadCurrentQueues();
+	refreshStaffDashboard();
+	setInterval(refreshStaffDashboard, 10000);
 });
 
 function bindStaffTabs() {
@@ -72,7 +97,7 @@ function bindStaffCallForm() {
 			});
 			renderStaffCallResult(ticket);
 			showToast(`Now calling ${ticket.queueNumber} at ${ticket.counterName}.`, "success");
-			loadCurrentQueues();
+			await refreshStaffDashboard();
 			loadStaffTicketList();
 		}
 		catch (error) {
@@ -83,11 +108,22 @@ function bindStaffCallForm() {
 	});
 }
 
-function bindStatusUpdateForm() {
-	elements.statusUpdateForm.addEventListener("submit", async (event) => {
+function bindStatusLookupForm() {
+	elements.statusLookupForm.addEventListener("submit", async (event) => {
 		event.preventDefault();
-		const payload = Object.fromEntries(new FormData(elements.statusUpdateForm).entries());
-		await updateTicketStatus(payload.queueNumber.trim().toUpperCase(), payload.status, elements.statusUpdateResult);
+		const formData = new FormData(elements.statusLookupForm);
+		const queueNumber = String(formData.get("queueNumber") || "").trim().toUpperCase();
+		await loadStatusTicket(queueNumber);
+	});
+}
+
+function bindStatusWorkflowActions() {
+	elements.statusActionPanel.addEventListener("click", async (event) => {
+		const button = event.target.closest("[data-workflow-status-action]");
+		if (!button) {
+			return;
+		}
+		await updateTicketStatus(button.dataset.queueNumber, button.dataset.workflowStatusAction);
 	});
 }
 
@@ -98,31 +134,35 @@ function bindQueueListForm() {
 	});
 }
 
-function bindQuickStatusActions() {
-	elements.staffCallResult.addEventListener("click", async (event) => {
-		const button = event.target.closest("[data-status-action]");
-		if (!button) {
-			return;
-		}
-		await updateTicketStatus(button.dataset.queueNumber, button.dataset.statusAction, elements.staffCallResult);
-	});
+async function loadStatusTicket(queueNumber) {
+	if (!queueNumber) {
+		return;
+	}
+	try {
+		const ticket = await requestJson(API.ticket(queueNumber));
+		renderStatusTicket(ticket);
+	}
+	catch (error) {
+		elements.statusUpdateResult.hidden = false;
+		elements.statusUpdateResult.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+		elements.statusActionPanel.hidden = true;
+		showToast(error.message, "error");
+	}
 }
 
-async function updateTicketStatus(queueNumber, status, resultElement) {
+async function updateTicketStatus(queueNumber, status) {
 	try {
 		const ticket = await requestJson(API.updateStatus(queueNumber), {
 			method: "PUT",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status })
 		});
-		renderStatusUpdateResult(ticket, resultElement);
+		renderStatusTicket(ticket, "Ticket Updated");
 		showToast(`${ticket.queueNumber} updated to ${ticket.status}.`, "success");
-		loadCurrentQueues();
+		await refreshStaffDashboard();
 		loadStaffTicketList();
 	}
 	catch (error) {
-		resultElement.hidden = false;
-		resultElement.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
 		showToast(error.message, "error");
 	}
 }
@@ -167,20 +207,38 @@ async function loadStaffTicketList() {
 
 	const formData = new FormData(elements.queueListForm);
 	const department = String(formData.get("department") || "").trim();
-	const status = String(formData.get("status") || "WAITING").trim();
+	const status = String(formData.get("status") || "").trim();
 	if (!department) {
 		elements.staffTicketList.innerHTML = `<p>Select a department to view tickets.</p>`;
 		return;
 	}
 
 	try {
-		const params = new URLSearchParams({ department, status });
+		const params = new URLSearchParams({ department });
+		if (status) {
+			params.set("status", status);
+		}
 		const tickets = await requestJson(`${API.queues}?${params.toString()}`);
 		renderStaffTicketList(tickets);
 	}
 	catch (error) {
 		elements.staffTicketList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
 		showToast(error.message, "error");
+	}
+}
+
+async function refreshStaffDashboard() {
+	await Promise.all([loadCurrentQueues(), loadCurrentServices()]);
+}
+
+async function loadCurrentServices() {
+	try {
+		const services = await requestJson(API.currentServices);
+		renderCounterServiceBoard(services);
+		renderCounterOptions(services);
+	}
+	catch (error) {
+		elements.counterServiceBoard.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
 	}
 }
 
@@ -192,7 +250,8 @@ async function loadCurrentQueues() {
 				<img class="dept-logo" src="${departmentLogo(queue.departmentCode)}" alt="${escapeHtml(queue.departmentName)} logo" loading="lazy">
 				<div>
 					<h3>${escapeHtml(queue.departmentName)}</h3>
-					<p>${queue.waitingCount} waiting</p>
+					<p>${queue.waitingCount} waiting · ${queue.usedSlots}/${queue.dailyQuota} slots used</p>
+					<p>${queue.currentQueueNumber ? `${escapeHtml(queue.counterName || "Unassigned Counter")} · ${escapeHtml(queue.serviceStatus || "-")}` : "No active service"}</p>
 				</div>
 				<div class="current-number">${queue.currentQueueNumber || "-"}</div>
 			</div>
@@ -204,7 +263,7 @@ async function loadCurrentQueues() {
 }
 
 async function requestJson(url, options = {}) {
-	const response = await fetch(url, options);
+	const response = await fetch(url, { cache: "no-store", ...options });
 	const isJson = response.headers.get("content-type")?.includes("application/json");
 	const body = isJson ? await response.json() : null;
 
@@ -224,19 +283,99 @@ function resolveErrorMessage(body, fallback) {
 
 function renderStaffCallResult(ticket) {
 	elements.staffCallResult.hidden = false;
-	elements.staffCallResult.innerHTML = `
-		${ticketSummary(ticket, "Now Calling")}
-		<div class="ticket-actions" aria-label="Quick status updates">
-			<button class="secondary-action" type="button" data-status-action="SERVING" data-queue-number="${escapeHtml(ticket.queueNumber)}">Start Serving</button>
-			<button class="secondary-action" type="button" data-status-action="COMPLETED" data-queue-number="${escapeHtml(ticket.queueNumber)}">Mark Completed</button>
-			<button class="danger-action" type="button" data-status-action="MISSED" data-queue-number="${escapeHtml(ticket.queueNumber)}">Mark Missed</button>
+	elements.staffCallResult.innerHTML = ticketSummary(ticket, "Now Calling");
+}
+
+function renderStatusTicket(ticket, heading = "Ticket Status") {
+	elements.statusUpdateResult.hidden = false;
+	elements.statusUpdateResult.innerHTML = ticketSummary(ticket, heading);
+	renderStatusWorkflowActions(ticket);
+}
+
+function renderStatusWorkflowActions(ticket) {
+	const actions = VALID_STATUS_ACTIONS[ticket.status] || [];
+	elements.statusActionPanel.hidden = false;
+	if (!actions.length) {
+		elements.statusActionPanel.innerHTML = `
+			<h3>No Further Action Required</h3>
+			<p class="muted-copy">${escapeHtml(ticket.queueNumber)} is already ${escapeHtml(ticket.status)}. This ticket has left the active queue.</p>
+		`;
+		return;
+	}
+
+	elements.statusActionPanel.innerHTML = `
+		<h3>Available Actions for ${escapeHtml(ticket.queueNumber)}</h3>
+		<p class="muted-copy">Current status: <strong>${escapeHtml(ticket.status)}</strong></p>
+		<div class="ticket-actions">
+			${actions.map((action) => `
+				<button class="${action.danger ? "danger-action" : "secondary-action"}" type="button"
+					data-workflow-status-action="${escapeHtml(action.status)}"
+					data-queue-number="${escapeHtml(ticket.queueNumber)}">${escapeHtml(action.label)}</button>
+			`).join("")}
 		</div>
 	`;
 }
 
-function renderStatusUpdateResult(ticket, resultElement) {
-	resultElement.hidden = false;
-	resultElement.innerHTML = ticketSummary(ticket, "Ticket Updated");
+function renderCounterServiceBoard(services) {
+	const servicesByCounter = new Map();
+	services.forEach((service) => {
+		const key = normalizeCounterName(service.counterName);
+		if (key) {
+			servicesByCounter.set(key, service);
+		}
+	});
+
+	const configuredCounters = [...DEFAULT_COUNTERS];
+	services.forEach((service) => {
+		const counterName = String(service.counterName || "").trim();
+		if (counterName && !configuredCounters.some((name) => normalizeCounterName(name) === normalizeCounterName(counterName))) {
+			configuredCounters.push(counterName);
+		}
+	});
+
+	elements.counterServiceBoard.innerHTML = configuredCounters.map((counterName, index) => {
+		const service = servicesByCounter.get(normalizeCounterName(counterName));
+		if (!service) {
+			return `
+				<article class="counter-service-card available" style="--row-index: ${index}">
+					<div class="counter-service-topline">
+						<strong>${escapeHtml(counterName)}</strong>
+						<span class="availability-pill">AVAILABLE</span>
+					</div>
+					<div class="counter-ticket-number available-counter">Ready</div>
+					<p>No active patient assigned.</p>
+				</article>
+			`;
+		}
+		return `
+			<article class="counter-service-card" style="--row-index: ${index}">
+				<div class="counter-service-topline">
+					<strong>${escapeHtml(service.counterName || counterName)}</strong>
+					<span class="status-pill">${escapeHtml(service.status)}</span>
+				</div>
+				<div class="counter-ticket-number">${escapeHtml(service.queueNumber)}</div>
+				<p>${escapeHtml(service.departmentName)}</p>
+				<p>${escapeHtml(service.patientName)}</p>
+				<small>Called at ${formatTime(service.calledAt)}</small>
+			</article>
+		`;
+	}).join("");
+}
+
+function renderCounterOptions(services) {
+	const busyCounters = new Set(services.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
+	const currentValue = elements.staffCounterSelect.value;
+	const options = [
+		`<option value="">Select available counter</option>`,
+		...DEFAULT_COUNTERS.map((counterName) => {
+			const busy = busyCounters.has(normalizeCounterName(counterName));
+			return `<option value="${escapeHtml(counterName)}" ${busy ? "disabled" : ""}>${escapeHtml(counterName)}${busy ? " · Busy" : " · Available"}</option>`;
+		})
+	];
+	elements.staffCounterSelect.innerHTML = options.join("");
+	if (currentValue && !busyCounters.has(normalizeCounterName(currentValue))) {
+		elements.staffCounterSelect.value = currentValue;
+	}
 }
 
 function renderStaffTicketList(tickets) {
@@ -250,7 +389,8 @@ function renderStaffTicketList(tickets) {
 			<img class="dept-logo" src="${departmentLogo(ticket.departmentCode)}" alt="${escapeHtml(ticket.departmentName)} logo" loading="lazy">
 			<div>
 				<h3>${escapeHtml(ticket.queueNumber)} - ${escapeHtml(ticket.patientName)}</h3>
-				<p>${escapeHtml(ticket.priorityCategory)} - ${ticket.peopleAhead} ahead - ${formatEstimatedWait(ticket)}</p>
+				<p>${escapeHtml(ticket.departmentName)} · ${escapeHtml(ticket.priorityCategory)} · ${ticket.peopleAhead} ahead</p>
+				<p>${ticket.counterName ? escapeHtml(ticket.counterName) : "No counter assigned"}</p>
 			</div>
 			<div class="current-number">${escapeHtml(ticket.status)}</div>
 		</div>
@@ -278,6 +418,10 @@ function ticketSummary(ticket, heading) {
 			${detailItem("Completed At", formatTime(ticket.completedAt))}
 		</div>
 	`;
+}
+
+function normalizeCounterName(value) {
+	return String(value || "").trim().toLowerCase();
 }
 
 function departmentLogo(code) {

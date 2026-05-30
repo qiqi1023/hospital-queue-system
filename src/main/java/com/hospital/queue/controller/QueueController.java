@@ -2,6 +2,7 @@ package com.hospital.queue.controller;
 
 import com.hospital.queue.constant.ApiRoutes;
 import com.hospital.queue.dto.CallNextRequest;
+import com.hospital.queue.dto.CounterServiceResponse;
 import com.hospital.queue.dto.QueueTicketResponse;
 import com.hospital.queue.dto.TakeQueueRequest;
 import com.hospital.queue.dto.UpdateTicketStatusRequest;
@@ -44,6 +45,11 @@ public class QueueController {
 	@PutMapping(ApiRoutes.NEXT_CALL)
 	public QueueTicketResponse callNext(@Valid @RequestBody CallNextRequest request) {
 		return queueService.callNext(request);
+	}
+
+	@GetMapping(ApiRoutes.CURRENT_SERVICES)
+	public List<CounterServiceResponse> getCurrentServices() {
+		return queueService.getCurrentServices();
 	}
 
 	@PutMapping(ApiRoutes.QUEUE_NUMBER_PATH + ApiRoutes.STATUS)

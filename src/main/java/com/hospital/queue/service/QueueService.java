@@ -7,6 +7,7 @@ import com.hospital.queue.domain.PriorityCategory;
 import com.hospital.queue.domain.QueueStatus;
 import com.hospital.queue.domain.QueueTicket;
 import com.hospital.queue.dto.CallNextRequest;
+import com.hospital.queue.dto.CounterServiceResponse;
 import com.hospital.queue.dto.CurrentQueueResponse;
 import com.hospital.queue.dto.DepartmentResponse;
 import com.hospital.queue.dto.QueueTicketResponse;
@@ -128,6 +129,9 @@ public class QueueService {
 		validateNotLunchBreak(now);
 
 		Department department = parseDepartment(request.departmentCode());
+		String counterName = request.counterName().trim();
+		validateCounterAvailable(counterName);
+
 		QueueTicket ticket = tickets.stream()
 			.filter(candidate -> candidate.getDepartment() == department)
 			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
@@ -138,9 +142,28 @@ public class QueueService {
 			));
 
 		ticket.setStatus(QueueStatus.CALLED);
-		ticket.setCounterName(request.counterName().trim());
+		ticket.setCounterName(counterName);
 		ticket.setCalledAt(now);
 		return toResponse(ticket);
+	}
+
+	public synchronized List<CounterServiceResponse> getCurrentServices() {
+		resetIfNewDay();
+		return tickets.stream()
+			.filter(ticket -> ticket.getStatus() == QueueStatus.CALLED || ticket.getStatus() == QueueStatus.SERVING)
+			.sorted(Comparator
+				.comparing((QueueTicket ticket) -> ticket.getCounterName() == null ? "" : ticket.getCounterName(), String.CASE_INSENSITIVE_ORDER)
+				.thenComparing(QueueTicket::getId))
+			.map(ticket -> new CounterServiceResponse(
+				ticket.getCounterName(),
+				ticket.getQueueNumber(),
+				ticket.getPatientName(),
+				ticket.getDepartment().name(),
+				ticket.getDepartment().getDisplayName(),
+				ticket.getStatus(),
+				ticket.getCalledAt()
+			))
+			.toList();
 	}
 
 	public synchronized List<DepartmentResponse> getDepartments() {
@@ -156,14 +179,19 @@ public class QueueService {
 	public synchronized List<CurrentQueueResponse> getCurrentQueues() {
 		resetIfNewDay();
 		return List.of(Department.values()).stream()
-			.map(department -> new CurrentQueueResponse(
-				department.name(),
-				department.getDisplayName(),
-				currentQueueNumber(department),
-				waitingCount(department),
-				usedSlots(department),
-				department.getDailyQuota()
-			))
+			.map(department -> {
+				QueueTicket currentTicket = currentTicket(department);
+				return new CurrentQueueResponse(
+					department.name(),
+					department.getDisplayName(),
+					currentTicket == null ? null : currentTicket.getQueueNumber(),
+					currentTicket == null ? null : currentTicket.getCounterName(),
+					currentTicket == null ? null : currentTicket.getStatus(),
+					waitingCount(department),
+					usedSlots(department),
+					department.getDailyQuota()
+				);
+			})
 			.toList();
 	}
 
@@ -196,6 +224,21 @@ public class QueueService {
 				&& now.toLocalTime().isBefore(QueueRules.LUNCH_BREAK_END_TIME)) {
 			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.LUNCH_BREAK_CALLING_PAUSED);
 		}
+	}
+
+
+	private void validateCounterAvailable(String counterName) {
+		tickets.stream()
+			.filter(ticket -> ticket.getCounterName() != null)
+			.filter(ticket -> ticket.getCounterName().equalsIgnoreCase(counterName))
+			.filter(ticket -> ticket.getStatus() == QueueStatus.CALLED || ticket.getStatus() == QueueStatus.SERVING)
+			.findFirst()
+			.ifPresent(ticket -> {
+				throw new BusinessRuleException(
+					HttpStatus.CONFLICT,
+					ResponseMessages.COUNTER_ALREADY_BUSY.formatted(counterName, ticket.getQueueNumber())
+				);
+			});
 	}
 
 	private void validateDailyQuota(Department department) {
@@ -299,12 +342,11 @@ public class QueueService {
 		return (int) Math.ceil(average);
 	}
 
-	private String currentQueueNumber(Department department) {
+	private QueueTicket currentTicket(Department department) {
 		return tickets.stream()
 			.filter(ticket -> ticket.getDepartment() == department)
 			.filter(ticket -> ticket.getStatus() == QueueStatus.SERVING || ticket.getStatus() == QueueStatus.CALLED)
 			.max(Comparator.comparing(QueueTicket::getId))
-			.map(QueueTicket::getQueueNumber)
 			.orElse(null);
 	}
 

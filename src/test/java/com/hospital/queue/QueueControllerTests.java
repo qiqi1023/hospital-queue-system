@@ -242,6 +242,39 @@ class QueueControllerTests {
 	}
 
 	@Test
+	void currentServicesShowsCounterAndActiveTicket() throws Exception {
+		mockMvc.perform(post("/api/queues")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"patientName": "Nur Iman",
+						"icNumber": "080910-08-5555",
+						"phoneNumber": "018-5556666",
+						"departmentCode": "GEN",
+						"visitReason": "Consultation",
+						"priorityCategory": "NORMAL"
+					}
+					"""))
+			.andExpect(status().isCreated());
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/queues/current-services"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].counterName", is("Counter 1")))
+			.andExpect(jsonPath("$[0].queueNumber", is("GEN001")))
+			.andExpect(jsonPath("$[0].status", is("CALLED")));
+	}
+
+	@Test
 	void duplicateActiveIcInSameDepartmentIsRejected() throws Exception {
 		String requestBody = """
 			{
@@ -267,7 +300,7 @@ class QueueControllerTests {
 	}
 
 	@Test
-	void cancelledAndMissedTicketsDoNotUseDailyQuota() throws Exception {
+	void dailyQuotaCountsCancelledAndMissedTicketsBecauseNumbersAreNotReused() throws Exception {
 		takeQueue("DEN", "010101010001", "NORMAL")
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.queueNumber", is("DEN001")));
@@ -277,15 +310,25 @@ class QueueControllerTests {
 		takeQueue("DEN", "010101010002", "NORMAL")
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.queueNumber", is("DEN002")));
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "DEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("DEN002")));
 		updateTicketStatus("DEN002", "MISSED")
 			.andExpect(status().isOk());
 
-		for (int index = 3; index <= 42; index++) {
+		for (int index = 3; index <= 40; index++) {
 			takeQueue("DEN", "01010101%04d".formatted(index), "NORMAL")
 				.andExpect(status().isCreated());
 		}
 
-		takeQueue("DEN", "010101010043", "NORMAL")
+		takeQueue("DEN", "010101010041", "NORMAL")
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.message", containsString("Daily quota for Dental Clinic is full")));
 	}
@@ -435,6 +478,86 @@ class QueueControllerTests {
 			.andExpect(jsonPath("$[0].queueNumber", is("SPC002")))
 			.andExpect(jsonPath("$[0].priorityCategory", is("PRIORITY")))
 			.andExpect(jsonPath("$[1].queueNumber", is("SPC001")));
+	}
+
+	@Test
+	void counterCannotCallAnotherTicketWhileItIsBusy() throws Exception {
+		takeQueue("GEN", "090909090001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("GEN001")));
+		takeQueue("GEN", "090909090002", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("GEN002")));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("GEN001")));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", is("Counter 1 is already calling or serving ticket GEN001.")));
+
+		updateTicketStatus("GEN001", "COMPLETED")
+			.andExpect(status().isOk());
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.queueNumber", is("GEN002")));
+	}
+
+	@Test
+	void waitingTicketCannotBeMarkedMissedBeforeItIsCalled() throws Exception {
+		takeQueue("LAB", "090909090003", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("LAB001")));
+
+		updateTicketStatus("LAB001", "MISSED")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.message", is("Ticket status cannot be changed from WAITING to MISSED.")));
+	}
+
+	@Test
+	void currentQueueSummaryShowsCounterAndServiceStatus() throws Exception {
+		takeQueue("GEN", "090909090004", "NORMAL")
+			.andExpect(status().isCreated());
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 3"
+					}
+					"""))
+			.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/departments/current-queues"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].departmentCode", is("GEN")))
+			.andExpect(jsonPath("$[0].currentQueueNumber", is("GEN001")))
+			.andExpect(jsonPath("$[0].counterName", is("Counter 3")))
+			.andExpect(jsonPath("$[0].serviceStatus", is("CALLED")));
 	}
 
 	private ResultActions takeQueue(String departmentCode, String icNumber, String priorityCategory) throws Exception {

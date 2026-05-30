@@ -30,7 +30,9 @@ public final class QueueRules {
 		QueueStatus.WAITING,
 		QueueStatus.CALLED,
 		QueueStatus.SERVING,
-		QueueStatus.COMPLETED
+		QueueStatus.COMPLETED,
+		QueueStatus.MISSED,
+		QueueStatus.CANCELLED
 	);
 	public static final Map<QueueStatus, Set<QueueStatus>> VALID_STATUS_TRANSITIONS = validStatusTransitions();
 
@@ -39,9 +41,9 @@ public final class QueueRules {
 
 	private static Map<QueueStatus, Set<QueueStatus>> validStatusTransitions() {
 		Map<QueueStatus, Set<QueueStatus>> transitions = new EnumMap<>(QueueStatus.class);
-		transitions.put(QueueStatus.WAITING, Set.of(QueueStatus.CANCELLED, QueueStatus.MISSED));
+		transitions.put(QueueStatus.WAITING, Set.of(QueueStatus.CANCELLED));
 		transitions.put(QueueStatus.CALLED, Set.of(QueueStatus.SERVING, QueueStatus.COMPLETED, QueueStatus.MISSED, QueueStatus.CANCELLED));
-		transitions.put(QueueStatus.SERVING, Set.of(QueueStatus.COMPLETED, QueueStatus.CANCELLED));
+		transitions.put(QueueStatus.SERVING, Set.of(QueueStatus.COMPLETED));
 		transitions.put(QueueStatus.COMPLETED, Set.of());
 		transitions.put(QueueStatus.MISSED, Set.of());
 		transitions.put(QueueStatus.CANCELLED, Set.of());
