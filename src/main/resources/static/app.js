@@ -1,8 +1,11 @@
 const API = {
 	departments: "/api/departments",
 	currentQueues: "/api/departments/current-queues",
-	queues: "/api/queues"
+	queues: "/api/queues",
+	cancelQueue: (queueNumber) => `/api/queues/${encodeURIComponent(queueNumber)}/cancel`
 };
+
+const CURRENT_QUEUE_REFRESH_INTERVAL_MS = 30000;
 
 const DEPARTMENT_LOGOS = {
 	GEN: "/assets/departments/general-consult-logo.png?v=20260530-3",
@@ -29,7 +32,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	document.body.classList.add("is-ready");
 	bindTabs();
 	bindForms();
+	bindTicketActions();
 	startClock();
+	startCurrentQueueAutoRefresh();
 	loadDepartments();
 	loadCurrentQueues();
 });
@@ -96,9 +101,38 @@ function bindForms() {
 
 }
 
+function bindTicketActions() {
+	document.addEventListener("click", async (event) => {
+		const button = event.target.closest("[data-cancel-queue]");
+		if (!button) {
+			return;
+		}
+
+		try {
+			const ticket = await requestJson(API.cancelQueue(button.dataset.cancelQueue), {
+				method: "PUT"
+			});
+			renderTicketDetail(ticket);
+			showToast(`${ticket.queueNumber} cancelled.`, "success");
+			loadCurrentQueues();
+		}
+		catch (error) {
+			showToast(error.message, "error");
+		}
+	});
+}
+
 function startClock() {
 	updateClock();
 	setInterval(updateClock, 1000);
+}
+
+function startCurrentQueueAutoRefresh() {
+	setInterval(() => {
+		if (document.querySelector("#current-panel")?.classList.contains("active")) {
+			loadCurrentQueues();
+		}
+	}, CURRENT_QUEUE_REFRESH_INTERVAL_MS);
 }
 
 function updateClock() {
@@ -186,9 +220,11 @@ function renderTicketResult(ticket) {
 				<p>Your Queue Number</p>
 				<div class="ticket-number">${ticket.queueNumber}</div>
 				<p>${escapeHtml(ticket.departmentName)} · ${formatTime(ticket.createdAt)} · ${ticket.priorityCategory}</p>
+				<p>${ticket.peopleAhead} ahead - ${formatEstimatedWait(ticket)}</p>
 				<span class="status-pill">${ticket.status}</span>
 			</div>
 		</div>
+		${renderCancelAction(ticket)}
 	`;
 }
 
@@ -207,8 +243,21 @@ function renderTicketDetail(ticket) {
 			${detailItem("Department", ticket.departmentName)}
 			${detailItem("Priority", ticket.priorityCategory)}
 			${detailItem("People Ahead", String(ticket.peopleAhead))}
+			${detailItem("Estimated Wait", formatEstimatedWait(ticket))}
 			${detailItem("Counter", ticket.counterName || "-")}
 			${detailItem("Registered", formatTime(ticket.createdAt))}
+		</div>
+		${renderCancelAction(ticket)}
+	`;
+}
+
+function renderCancelAction(ticket) {
+	if (ticket.status !== "WAITING") {
+		return "";
+	}
+	return `
+		<div class="ticket-actions">
+			<button class="danger-action" type="button" data-cancel-queue="${escapeHtml(ticket.queueNumber)}">Cancel Queue</button>
 		</div>
 	`;
 }
@@ -258,6 +307,13 @@ function formatTime(value) {
 		minute: "2-digit",
 		hour12: false
 	}).format(new Date(value));
+}
+
+function formatEstimatedWait(ticket) {
+	if (ticket.estimatedWaitMinutes === null || ticket.estimatedWaitMinutes === undefined) {
+		return `${Number(ticket.peopleAhead || 0) * 15} min`;
+	}
+	return `${ticket.estimatedWaitMinutes} min`;
 }
 
 function showToast(message, type = "") {

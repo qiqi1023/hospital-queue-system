@@ -13,6 +13,7 @@ import com.hospital.queue.dto.QueueTicketResponse;
 import com.hospital.queue.dto.TakeQueueRequest;
 import com.hospital.queue.dto.UpdateTicketStatusRequest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -86,6 +87,19 @@ public class QueueService {
 		return toResponse(findTicket(queueNumber));
 	}
 
+	public synchronized List<QueueTicketResponse> getTickets(String departmentCode, String statusCode) {
+		resetIfNewDay();
+		Department department = departmentCode == null || departmentCode.isBlank() ? null : parseDepartment(departmentCode);
+		QueueStatus status = statusCode == null || statusCode.isBlank() ? null : parseStatus(statusCode);
+
+		return tickets.stream()
+			.filter(ticket -> department == null || ticket.getDepartment() == department)
+			.filter(ticket -> status == null || ticket.getStatus() == status)
+			.sorted(QUEUE_ORDER)
+			.map(this::toResponse)
+			.toList();
+	}
+
 	public synchronized QueueTicketResponse updateStatus(String queueNumber, UpdateTicketStatusRequest request) {
 		resetIfNewDay();
 		QueueTicket ticket = findTicket(queueNumber);
@@ -97,6 +111,14 @@ public class QueueService {
 			ticket.setCompletedAt(now);
 		}
 
+		return toResponse(ticket);
+	}
+
+	public synchronized QueueTicketResponse cancelTicket(String queueNumber) {
+		resetIfNewDay();
+		QueueTicket ticket = findTicket(queueNumber);
+		validateStatusTransition(ticket.getStatus(), QueueStatus.CANCELLED);
+		ticket.setStatus(QueueStatus.CANCELLED);
 		return toResponse(ticket);
 	}
 
@@ -212,6 +234,15 @@ public class QueueService {
 		}
 	}
 
+	private QueueStatus parseStatus(String statusCode) {
+		try {
+			return QueueStatus.valueOf(statusCode.trim().toUpperCase());
+		}
+		catch (IllegalArgumentException ex) {
+			throw new BusinessRuleException(HttpStatus.BAD_REQUEST, ResponseMessages.UNKNOWN_STATUS.formatted(statusCode));
+		}
+	}
+
 	private QueueTicketResponse toResponse(QueueTicket ticket) {
 		return new QueueTicketResponse(
 			ticket.getQueueNumber(),
@@ -225,6 +256,7 @@ public class QueueService {
 			ticket.getStatus(),
 			ticket.getCounterName(),
 			peopleAhead(ticket),
+			estimatedWaitMinutes(ticket),
 			ticket.getQueueDate(),
 			ticket.getCreatedAt(),
 			ticket.getCalledAt(),
@@ -238,6 +270,33 @@ public class QueueService {
 			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
 			.filter(candidate -> QUEUE_ORDER.compare(candidate, ticket) < 0)
 			.count();
+	}
+
+	private Integer estimatedWaitMinutes(QueueTicket ticket) {
+		if (ticket.getStatus() != QueueStatus.WAITING) {
+			return 0;
+		}
+
+		int averageServiceMinutes = averageServiceMinutes(ticket.getDepartment());
+		return peopleAhead(ticket) * averageServiceMinutes;
+	}
+
+	private int averageServiceMinutes(Department department) {
+		List<Long> serviceDurations = tickets.stream()
+			.filter(ticket -> ticket.getDepartment() == department)
+			.filter(ticket -> ticket.getCalledAt() != null && ticket.getCompletedAt() != null)
+			.map(ticket -> Duration.between(ticket.getCalledAt(), ticket.getCompletedAt()).toMinutes())
+			.filter(minutes -> minutes > 0)
+			.toList();
+
+		if (serviceDurations.isEmpty()) {
+			return QueueRules.DEFAULT_SERVICE_MINUTES;
+		}
+		double average = serviceDurations.stream()
+			.mapToLong(Long::longValue)
+			.average()
+			.orElse(0);
+		return (int) Math.ceil(average);
 	}
 
 	private String currentQueueNumber(Department department) {

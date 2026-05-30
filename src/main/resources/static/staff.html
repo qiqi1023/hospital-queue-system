@@ -31,6 +31,7 @@
 			<nav class="tabs" aria-label="Staff queue functions">
 				<button class="tab-button active" type="button" data-staff-tab="call-next">Call Next Patient</button>
 				<button class="tab-button" type="button" data-staff-tab="update-status">Update Ticket Status</button>
+				<button class="tab-button" type="button" data-staff-tab="queue-list">Queue List</button>
 			</nav>
 
 			<section id="call-next-panel" class="tab-panel active" data-staff-panel="call-next" aria-labelledby="call-next-heading">
@@ -84,6 +85,36 @@
 
 				<article id="status-update-result" class="ticket-detail" hidden aria-live="polite"></article>
 			</section>
+
+			<section id="queue-list-panel" class="tab-panel" data-staff-panel="queue-list" aria-labelledby="queue-list-heading">
+				<div class="section-heading">
+					<h2 id="queue-list-heading">Department Queue List</h2>
+					<p>View tickets by department and status in calling order.</p>
+				</div>
+
+				<form id="queue-list-form" class="form-grid">
+					<label>
+						<span>Department</span>
+						<select name="department" class="department-select" required>
+							<option value="">Select department</option>
+						</select>
+					</label>
+					<label>
+						<span>Status</span>
+						<select name="status" required>
+							<option value="WAITING">WAITING</option>
+							<option value="CALLED">CALLED</option>
+							<option value="SERVING">SERVING</option>
+							<option value="COMPLETED">COMPLETED</option>
+							<option value="MISSED">MISSED</option>
+							<option value="CANCELLED">CANCELLED</option>
+						</select>
+					</label>
+					<button class="primary-action full" type="submit">Load Queue List</button>
+				</form>
+
+				<div id="staff-ticket-list" class="queue-list" aria-live="polite"></div>
+			</section>
 		</section>
 
 		<aside class="side-panel" aria-label="Current queues">
@@ -96,6 +127,6 @@
 	</main>
 
 	<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-	<script src="/staff.js?v=20260530-6" defer></script>
+	<script src="/staff.js?v=20260530-9" defer></script>
 </body>
 </html>

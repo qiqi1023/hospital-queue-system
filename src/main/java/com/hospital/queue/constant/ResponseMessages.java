@@ -13,6 +13,7 @@ public final class ResponseMessages {
 	public static final String NO_WAITING_TICKET = "No waiting ticket found for %s.";
 	public static final String STATUS_UPDATED = "Ticket status updated successfully.";
 	public static final String INVALID_STATUS_TRANSITION = "Ticket status cannot be changed from %s to %s.";
+	public static final String UNKNOWN_STATUS = "Unknown ticket status: %s";
 
 	private ResponseMessages() {
 	}

@@ -16,6 +16,7 @@ public final class QueueRules {
 	public static final LocalTime LUNCH_BREAK_END_TIME = LocalTime.of(14, 0);
 	public static final int INITIAL_SEQUENCE = 0;
 	public static final int FIRST_SEQUENCE = 1;
+	public static final int DEFAULT_SERVICE_MINUTES = 15;
 	public static final long INITIAL_TICKET_ID = 1L;
 	public static final int IC_DIGIT_COUNT = 12;
 	public static final String NON_DIGIT_REGEX = "[^0-9]";

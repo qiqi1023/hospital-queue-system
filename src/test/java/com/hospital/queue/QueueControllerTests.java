@@ -353,6 +353,90 @@ class QueueControllerTests {
 			.andExpect(jsonPath("$.validationErrors.phoneNumber", containsString("valid Malaysian mobile number")));
 	}
 
+	@Test
+	void ticketResponseIncludesEstimatedWaitTimeFromDepartmentAverageServiceDuration() throws Exception {
+		takeQueue("GEN", "050505050001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("GEN001")))
+			.andExpect(jsonPath("$.estimatedWaitMinutes", is(0)));
+
+		mockMvc.perform(put("/api/queues/next-call")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"departmentCode": "GEN",
+						"counterName": "Counter 1"
+					}
+					"""))
+			.andExpect(status().isOk());
+
+		queueClock.setTime(LocalTime.of(9, 12));
+		updateTicketStatus("GEN001", "COMPLETED")
+			.andExpect(status().isOk());
+
+		takeQueue("GEN", "050505050002", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.peopleAhead", is(0)))
+			.andExpect(jsonPath("$.estimatedWaitMinutes", is(0)));
+
+		takeQueue("GEN", "050505050003", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.peopleAhead", is(1)))
+			.andExpect(jsonPath("$.estimatedWaitMinutes", is(12)));
+	}
+
+	@Test
+	void estimatedWaitUsesFifteenMinutesPerPatientBeforeServiceHistoryExists() throws Exception {
+		takeQueue("PHA", "080808080001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("PHA001")))
+			.andExpect(jsonPath("$.peopleAhead", is(0)))
+			.andExpect(jsonPath("$.estimatedWaitMinutes", is(0)));
+
+		takeQueue("PHA", "080808080002", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("PHA002")))
+			.andExpect(jsonPath("$.peopleAhead", is(1)))
+			.andExpect(jsonPath("$.estimatedWaitMinutes", is(15)));
+	}
+
+	@Test
+	void patientCanCancelWaitingTicket() throws Exception {
+		takeQueue("LAB", "060606060001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("LAB001")));
+
+		mockMvc.perform(put("/api/queues/LAB001/cancel"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status", is("CANCELLED")));
+
+		mockMvc.perform(get("/api/queues")
+				.param("department", "LAB")
+				.param("status", "WAITING"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()", is(0)));
+	}
+
+	@Test
+	void staffCanListWaitingTicketsByDepartmentInQueueOrder() throws Exception {
+		takeQueue("SPC", "070707070001", "NORMAL")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("SPC001")));
+
+		takeQueue("SPC", "070707070002", "PRIORITY")
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.queueNumber", is("SPC002")));
+
+		mockMvc.perform(get("/api/queues")
+				.param("department", "SPC")
+				.param("status", "WAITING"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()", is(2)))
+			.andExpect(jsonPath("$[0].queueNumber", is("SPC002")))
+			.andExpect(jsonPath("$[0].priorityCategory", is("PRIORITY")))
+			.andExpect(jsonPath("$[1].queueNumber", is("SPC001")));
+	}
+
 	private ResultActions takeQueue(String departmentCode, String icNumber, String priorityCategory) throws Exception {
 		return mockMvc.perform(post("/api/queues")
 			.contentType(MediaType.APPLICATION_JSON)

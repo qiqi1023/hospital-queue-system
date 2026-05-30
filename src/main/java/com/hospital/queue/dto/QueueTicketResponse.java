@@ -17,6 +17,7 @@ public record QueueTicketResponse(
 		QueueStatus status,
 		String counterName,
 		int peopleAhead,
+		Integer estimatedWaitMinutes,
 		LocalDate queueDate,
 		LocalDateTime createdAt,
 		LocalDateTime calledAt,
