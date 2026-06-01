@@ -60,6 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	bindStatusLookupForm();
 	bindStatusWorkflowActions();
 	bindQueueListForm();
+	bindGlobalJumpToStatus();
 	startClock();
 	loadDepartments();
 	refreshStaffDashboard();
@@ -131,6 +132,35 @@ function bindQueueListForm() {
 	elements.queueListForm.addEventListener("submit", async (event) => {
 		event.preventDefault();
 		await loadStaffTicketList();
+	});
+}
+
+function bindGlobalJumpToStatus() {
+	document.addEventListener("click", async (event) => {
+		const trigger = event.target.closest("[data-jump-to-status]");
+		if (!trigger) {
+			return;
+		}
+
+		event.preventDefault();
+		console.log("Ticket row clicked! Jumping to status for:", trigger.dataset.jumpToStatus);
+		const queueNumber = trigger.dataset.jumpToStatus;
+		
+		let targetTabName = "status";
+		elements.tabPanels.forEach((panel) => {
+			if (panel.contains(elements.statusLookupForm) || panel === elements.statusLookupForm) {
+				targetTabName = panel.dataset.staffPanel;
+			}
+		});
+		showStaffTab(targetTabName);
+		window.scrollTo({ top: 0, behavior: "smooth" });
+
+		const input = elements.statusLookupForm.querySelector("[name='queueNumber']");
+		if (input) {
+			input.value = queueNumber;
+		}
+
+		await loadStatusTicket(queueNumber);
 	});
 }
 
@@ -246,7 +276,7 @@ async function loadCurrentQueues() {
 	try {
 		const queues = await requestJson(API.currentQueues);
 		elements.currentQueueList.innerHTML = queues.map((queue, index) => `
-			<div class="queue-row" style="--row-index: ${index}">
+			<div class="queue-row" style="--row-index: ${index}${queue.currentQueueNumber ? '; cursor: pointer;' : ''}" ${queue.currentQueueNumber ? `title="Click to update status" data-jump-to-status="${escapeHtml(queue.currentQueueNumber)}"` : ''}>
 				<img class="dept-logo" src="${departmentLogo(queue.departmentCode)}" alt="${escapeHtml(queue.departmentName)} logo" loading="lazy">
 				<div>
 					<h3>${escapeHtml(queue.departmentName)}</h3>
@@ -348,7 +378,7 @@ function renderCounterServiceBoard(services) {
 			`;
 		}
 		return `
-			<article class="counter-service-card" style="--row-index: ${index}">
+			<article class="counter-service-card" style="--row-index: ${index}; cursor: pointer;" title="Click to update status" data-jump-to-status="${escapeHtml(service.queueNumber)}">
 				<div class="counter-service-topline">
 					<strong>${escapeHtml(service.counterName || counterName)}</strong>
 					<span class="status-pill">${escapeHtml(service.status)}</span>
@@ -385,7 +415,7 @@ function renderStaffTicketList(tickets) {
 	}
 
 	elements.staffTicketList.innerHTML = tickets.map((ticket, index) => `
-		<div class="queue-row" style="--row-index: ${index}">
+		<div class="queue-row" style="--row-index: ${index}; cursor: pointer;" title="Click to update status" data-jump-to-status="${escapeHtml(ticket.queueNumber)}">
 			<img class="dept-logo" src="${departmentLogo(ticket.departmentCode)}" alt="${escapeHtml(ticket.departmentName)} logo" loading="lazy">
 			<div>
 				<h3>${escapeHtml(ticket.queueNumber)} - ${escapeHtml(ticket.patientName)}</h3>
