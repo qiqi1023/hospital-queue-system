@@ -137,7 +137,6 @@ Follow these exact steps to clone, configure, compile, and run the system locall
 
 ```
 git clone https://github.com/qiqi1023/hospital-queue-system.git
-
 ```
 
 
@@ -199,7 +198,6 @@ Once logs track a successful startup sequence, access the system's live front-en
 
 ```
 http://localhost:8081
-
 ```
 
 ### Postman Testing
@@ -215,7 +213,3 @@ http://localhost:8081
 
 * This system is developed as an assignment milestone for course **SECJ4383 Software Construction**.
 * All code contained in this repository has been independently developed and thoroughly understood by our group members in complete compliance with academic regulations.
-
-```
-
-```
