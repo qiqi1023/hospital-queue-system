@@ -176,6 +176,36 @@ spring.jpa.hibernate.show-sql=true
 
 ```
 
+### Connect to Neon PostgreSQL
+
+This project has a `neon` Spring profile for your Neon database. Keep your Neon password in environment variables, not in `application.properties`.
+
+1. Open your Neon project named `smart-queue-mys`.
+2. Click **Connect**.
+3. Choose **Java** or **JDBC** if Neon shows stack options.
+4. Copy the connection details and convert them to this format:
+
+```properties
+NEON_JDBC_URL=jdbc:postgresql://<your-neon-host>/<database-name>?sslmode=require&channel_binding=require
+NEON_DB_USERNAME=<your-neon-role>
+NEON_DB_PASSWORD=<your-neon-password>
+SPRING_PROFILES_ACTIVE=neon
+```
+
+In PowerShell, you can set them for the current terminal session like this:
+
+```powershell
+$env:NEON_JDBC_URL="jdbc:postgresql://<your-neon-host>/<database-name>?sslmode=require&channel_binding=require"
+$env:NEON_DB_USERNAME="<your-neon-role>"
+$env:NEON_DB_PASSWORD="<your-neon-password>"
+$env:SPRING_PROFILES_ACTIVE="neon"
+.\mvnw.cmd spring-boot:run
+```
+
+If Neon gives you a URL that starts with `postgresql://`, change only the beginning to `jdbc:postgresql://` for Spring Boot JDBC.
+
+Note: the application currently keeps queue tickets in memory inside `QueueService`. The Neon connection is configured, but ticket data will only be saved in Neon after adding JPA entities and repositories for the queue tickets.
+
 ### Step 4: Build and Launch the Server inside IDE
 
 1. Right-click on the root project folder named `hospital-queue-system`.

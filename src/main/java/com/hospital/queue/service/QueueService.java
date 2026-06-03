@@ -13,6 +13,7 @@ import com.hospital.queue.dto.DepartmentResponse;
 import com.hospital.queue.dto.QueueTicketResponse;
 import com.hospital.queue.dto.TakeQueueRequest;
 import com.hospital.queue.dto.UpdateTicketStatusRequest;
+import com.hospital.queue.repository.QueueTicketRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -33,17 +34,20 @@ public class QueueService {
 		.thenComparing(QueueTicket::getId);
 
 	private final Clock clock;
+	private final QueueTicketRepository ticketRepository;
 	private final AtomicLong idSequence = new AtomicLong(QueueRules.INITIAL_TICKET_ID);
 	private final List<QueueTicket> tickets = new ArrayList<>();
 	private final Map<Department, Integer> departmentSequences = new EnumMap<>(Department.class);
 	private LocalDate activeDate;
 
-	public QueueService(Clock clock) {
+	public QueueService(Clock clock, QueueTicketRepository ticketRepository) {
 		this.clock = clock;
+		this.ticketRepository = ticketRepository;
 		this.activeDate = LocalDate.now(clock);
 		for (Department department : Department.values()) {
 			departmentSequences.put(department, QueueRules.INITIAL_SEQUENCE);
 		}
+		loadTicketsForActiveDate();
 	}
 
 	public synchronized QueueTicketResponse takeQueue(TakeQueueRequest request) {
@@ -79,6 +83,7 @@ public class QueueService {
 			now
 		);
 		tickets.add(ticket);
+		ticketRepository.save(ticket);
 
 		return toResponse(ticket);
 	}
@@ -111,6 +116,7 @@ public class QueueService {
 		if (request.status() == QueueStatus.COMPLETED) {
 			ticket.setCompletedAt(now);
 		}
+		ticketRepository.save(ticket);
 
 		return toResponse(ticket);
 	}
@@ -120,6 +126,7 @@ public class QueueService {
 		QueueTicket ticket = findTicket(queueNumber);
 		validateStatusTransition(ticket.getStatus(), QueueStatus.CANCELLED);
 		ticket.setStatus(QueueStatus.CANCELLED);
+		ticketRepository.save(ticket);
 		return toResponse(ticket);
 	}
 
@@ -144,6 +151,7 @@ public class QueueService {
 		ticket.setStatus(QueueStatus.CALLED);
 		ticket.setCounterName(counterName);
 		ticket.setCalledAt(now);
+		ticketRepository.save(ticket);
 		return toResponse(ticket);
 	}
 
@@ -367,10 +375,41 @@ public class QueueService {
 	private void resetIfNewDay() {
 		LocalDate today = LocalDate.now(clock);
 		if (!today.equals(activeDate)) {
-			tickets.clear();
-			idSequence.set(QueueRules.INITIAL_TICKET_ID);
-			departmentSequences.replaceAll((department, sequence) -> QueueRules.INITIAL_SEQUENCE);
 			activeDate = today;
+			loadTicketsForActiveDate();
+		}
+	}
+
+	private void loadTicketsForActiveDate() {
+		tickets.clear();
+		tickets.addAll(ticketRepository.findByQueueDateOrderByIdAsc(activeDate));
+		idSequence.set(nextTicketId());
+		departmentSequences.replaceAll((department, sequence) -> QueueRules.INITIAL_SEQUENCE);
+		tickets.forEach(ticket -> departmentSequences.merge(
+			ticket.getDepartment(),
+			sequenceNumber(ticket),
+			Math::max
+		));
+	}
+
+	private long nextTicketId() {
+		return tickets.stream()
+			.mapToLong(QueueTicket::getId)
+			.max()
+			.orElse(QueueRules.INITIAL_TICKET_ID - 1) + 1;
+	}
+
+	private int sequenceNumber(QueueTicket ticket) {
+		String prefix = ticket.getDepartment().name();
+		String queueNumber = ticket.getQueueNumber();
+		if (!queueNumber.startsWith(prefix)) {
+			return QueueRules.INITIAL_SEQUENCE;
+		}
+		try {
+			return Integer.parseInt(queueNumber.substring(prefix.length()));
+		}
+		catch (NumberFormatException ex) {
+			return QueueRules.INITIAL_SEQUENCE;
 		}
 	}
 }

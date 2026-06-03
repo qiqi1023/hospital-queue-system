@@ -1,23 +1,66 @@
 package com.hospital.queue.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+@Entity
+@Table(name = "queue_tickets")
 public class QueueTicket {
-	private final long id;
-	private final String queueNumber;
-	private final String patientName;
-	private final String icNumber;
-	private final String phoneNumber;
-	private final Department department;
-	private final String visitReason;
-	private final PriorityCategory priorityCategory;
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	private Long databaseId;
+
+	@Column(nullable = false)
+	private long id;
+
+	@Column(nullable = false)
+	private String queueNumber;
+
+	@Column(nullable = false)
+	private String patientName;
+
+	@Column(nullable = false)
+	private String icNumber;
+
+	@Column(nullable = false)
+	private String phoneNumber;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false)
+	private Department department;
+
+	@Column(nullable = false)
+	private String visitReason;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false)
+	private PriorityCategory priorityCategory;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false)
 	private QueueStatus status;
+
 	private String counterName;
-	private final LocalDate queueDate;
-	private final LocalDateTime createdAt;
+
+	@Column(nullable = false)
+	private LocalDate queueDate;
+
+	@Column(nullable = false)
+	private LocalDateTime createdAt;
+
 	private LocalDateTime calledAt;
 	private LocalDateTime completedAt;
+
+	protected QueueTicket() {
+	}
 
 	public QueueTicket(
 			long id,
