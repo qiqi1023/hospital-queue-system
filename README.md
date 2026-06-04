@@ -204,7 +204,7 @@ $env:SPRING_PROFILES_ACTIVE="neon"
 
 If Neon gives you a URL that starts with `postgresql://`, change only the beginning to `jdbc:postgresql://` for Spring Boot JDBC.
 
-Note: the application currently keeps queue tickets in memory inside `QueueService`. The Neon connection is configured, but ticket data will only be saved in Neon after adding JPA entities and repositories for the queue tickets.
+Note: when the `neon` Spring profile is active, queue ticket data is saved to Neon PostgreSQL through the existing JPA entity and repository. The application reloads the current day's queue tickets from the database when it starts.
 
 ### Step 4: Build and Launch the Server inside IDE
 
