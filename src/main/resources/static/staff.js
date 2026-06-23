@@ -1,14 +1,18 @@
+const CONTEXT_PATH = document.querySelector('meta[name="context-path"]')?.content || "";
+
 const API = {
-	departments: "/api/departments",
-	currentQueues: "/api/departments/current-queues",
-	currentServices: "/api/queues/current-services",
-	queues: "/api/queues",
-	ticket: (queueNumber) => `/api/queues/${encodeURIComponent(queueNumber)}`,
-	nextCall: "/api/queues/next-call",
-	updateStatus: (queueNumber) => `/api/queues/${encodeURIComponent(queueNumber)}/status`
+	departments: `${CONTEXT_PATH}/api/departments`,
+	counters: `${CONTEXT_PATH}/api/counters`,
+	currentQueues: `${CONTEXT_PATH}/api/queues/current`,
+	currentServices: `${CONTEXT_PATH}/api/queues/current`,
+	queues: `${CONTEXT_PATH}/api/queueTickets`,
+	ticket: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}`,
+	nextCall: `${CONTEXT_PATH}/api/queueCalls`,
+	updateStatus: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}/status`
 };
 
-const DEFAULT_COUNTERS = ["Counter 1", "Counter 2", "Counter 3", "Counter 4", "Counter 5"];
+let counterData = [];
+let activeServices = [];
 
 const VALID_STATUS_ACTIONS = {
 	WAITING: [
@@ -24,16 +28,18 @@ const VALID_STATUS_ACTIONS = {
 		{ status: "COMPLETED", label: "Mark Completed" }
 	],
 	COMPLETED: [],
-	MISSED: [],
+	MISSED: [
+		{ status: "WAITING", label: "Return to Queue" }
+	],
 	CANCELLED: []
 };
 
 const DEPARTMENT_LOGOS = {
-	GEN: "/assets/departments/general-consult-logo.png?v=20260530-3",
-	PHA: "/assets/departments/pharmacy-logo.png?v=20260530-3",
-	DEN: "/assets/departments/dental-logo.png?v=20260530-3",
-	LAB: "/assets/departments/blood-test-logo.png?v=20260530-3",
-	SPC: "/assets/departments/specialist-logo.png?v=20260530-3"
+	GEN: `${CONTEXT_PATH}/assets/departments/general-consult-logo.png?v=20260530-3`,
+	PHA: `${CONTEXT_PATH}/assets/departments/pharmacy-logo.png?v=20260530-3`,
+	DEN: `${CONTEXT_PATH}/assets/departments/dental-logo.png?v=20260530-3`,
+	LAB: `${CONTEXT_PATH}/assets/departments/blood-test-logo.png?v=20260530-3`,
+	SPC: `${CONTEXT_PATH}/assets/departments/specialist-logo.png?v=20260530-3`
 };
 
 const elements = {
@@ -62,10 +68,14 @@ document.addEventListener("DOMContentLoaded", () => {
 	bindQueueListForm();
 	bindGlobalJumpToStatus();
 	startClock();
-	loadDepartments();
-	refreshStaffDashboard();
+	initializeStaffData();
 	setInterval(refreshStaffDashboard, 10000);
 });
+
+async function initializeStaffData() {
+	await Promise.all([loadDepartments(), loadCounters()]);
+	await refreshStaffDashboard();
+}
 
 function bindStaffTabs() {
 	elements.tabButtons.forEach((button) => {
@@ -86,13 +96,16 @@ function showStaffTab(tabName) {
 }
 
 function bindStaffCallForm() {
+	document.querySelector("#staff-department-select")?.addEventListener("change", () => {
+		renderCounterOptions(activeServices);
+	});
 	elements.staffCallForm.addEventListener("submit", async (event) => {
 		event.preventDefault();
 		const payload = Object.fromEntries(new FormData(elements.staffCallForm).entries());
 
 		try {
 			const ticket = await requestJson(API.nextCall, {
-				method: "PUT",
+				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
 			});
@@ -183,7 +196,7 @@ async function loadStatusTicket(queueNumber) {
 async function updateTicketStatus(queueNumber, status) {
 	try {
 		const ticket = await requestJson(API.updateStatus(queueNumber), {
-			method: "PUT",
+			method: "PATCH",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status })
 		});
@@ -230,13 +243,24 @@ async function loadDepartments() {
 	}
 }
 
+async function loadCounters() {
+	try {
+		counterData = await requestJson(API.counters);
+		renderCounterServiceBoard(activeServices);
+		renderCounterOptions(activeServices);
+	}
+	catch (error) {
+		showToast(error.message, "error");
+	}
+}
+
 async function loadStaffTicketList() {
 	if (!elements.queueListForm || !elements.staffTicketList) {
 		return;
 	}
 
 	const formData = new FormData(elements.queueListForm);
-	const department = String(formData.get("department") || "").trim();
+		const department = String(formData.get("department") || "").trim();
 	const status = String(formData.get("status") || "").trim();
 	if (!department) {
 		elements.staffTicketList.innerHTML = `<p>Select a department to view tickets.</p>`;
@@ -244,12 +268,12 @@ async function loadStaffTicketList() {
 	}
 
 	try {
-		const params = new URLSearchParams({ department });
+		const params = new URLSearchParams({ departmentCode: department });
 		if (status) {
 			params.set("status", status);
 		}
 		const tickets = await requestJson(`${API.queues}?${params.toString()}`);
-		renderStaffTicketList(tickets);
+		renderStaffTicketList(tickets.content || []);
 	}
 	catch (error) {
 		elements.staffTicketList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
@@ -263,9 +287,14 @@ async function refreshStaffDashboard() {
 
 async function loadCurrentServices() {
 	try {
-		const services = await requestJson(API.currentServices);
-		renderCounterServiceBoard(services);
-		renderCounterOptions(services);
+		const queues = await requestJson(API.currentServices);
+		activeServices = queues.filter((queue) => queue.currentQueueNumber).map((queue) => ({
+			counterName: queue.counterName, queueNumber: queue.currentQueueNumber,
+			departmentCode: queue.departmentCode, departmentName: queue.departmentName,
+			status: queue.status, calledAt: null
+		}));
+		renderCounterServiceBoard(activeServices);
+		renderCounterOptions(activeServices);
 	}
 	catch (error) {
 		elements.counterServiceBoard.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
@@ -281,7 +310,7 @@ async function loadCurrentQueues() {
 				<div>
 					<h3>${escapeHtml(queue.departmentName)}</h3>
 					<p>${queue.waitingCount} waiting · ${queue.usedSlots}/${queue.dailyQuota} slots used</p>
-					<p>${queue.currentQueueNumber ? `${escapeHtml(queue.counterName || "Unassigned Counter")} · ${escapeHtml(queue.serviceStatus || "-")}` : "No active service"}</p>
+					<p>${queue.currentQueueNumber ? `${escapeHtml(queue.counterName || "Unassigned Counter")} · ${escapeHtml(queue.status || "-")}` : "No active service"}</p>
 				</div>
 				<div class="current-number">${queue.currentQueueNumber || "-"}</div>
 			</div>
@@ -301,7 +330,7 @@ async function requestJson(url, options = {}) {
 		throw new Error(resolveErrorMessage(body, response.statusText));
 	}
 
-	return body;
+	return body?.success === true ? body.data : body;
 }
 
 function resolveErrorMessage(body, fallback) {
@@ -355,25 +384,19 @@ function renderCounterServiceBoard(services) {
 		}
 	});
 
-	const configuredCounters = [...DEFAULT_COUNTERS];
-	services.forEach((service) => {
-		const counterName = String(service.counterName || "").trim();
-		if (counterName && !configuredCounters.some((name) => normalizeCounterName(name) === normalizeCounterName(counterName))) {
-			configuredCounters.push(counterName);
-		}
-	});
-
-	elements.counterServiceBoard.innerHTML = configuredCounters.map((counterName, index) => {
+	elements.counterServiceBoard.innerHTML = counterData.map((counter, index) => {
+		const counterName = counter.name;
 		const service = servicesByCounter.get(normalizeCounterName(counterName));
 		if (!service) {
+			const isOpen = counter.status === "OPEN";
 			return `
-				<article class="counter-service-card available" style="--row-index: ${index}">
+				<article class="counter-service-card ${isOpen ? "available" : ""}" style="--row-index: ${index}">
 					<div class="counter-service-topline">
 						<strong>${escapeHtml(counterName)}</strong>
-						<span class="availability-pill">AVAILABLE</span>
+						<span class="availability-pill">${escapeHtml(counter.status)}</span>
 					</div>
-					<div class="counter-ticket-number available-counter">Ready</div>
-					<p>No active patient assigned.</p>
+					<div class="counter-ticket-number available-counter">${isOpen ? "Ready" : "Unavailable"}</div>
+					<p>${escapeHtml(counter.departmentCode)} · No active patient assigned.</p>
 				</article>
 			`;
 		}
@@ -385,7 +408,6 @@ function renderCounterServiceBoard(services) {
 				</div>
 				<div class="counter-ticket-number">${escapeHtml(service.queueNumber)}</div>
 				<p>${escapeHtml(service.departmentName)}</p>
-				<p>${escapeHtml(service.patientName)}</p>
 				<small>Called at ${formatTime(service.calledAt)}</small>
 			</article>
 		`;
@@ -395,15 +417,22 @@ function renderCounterServiceBoard(services) {
 function renderCounterOptions(services) {
 	const busyCounters = new Set(services.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
 	const currentValue = elements.staffCounterSelect.value;
+	const departmentCode = document.querySelector("#staff-department-select")?.value || "";
+	const matchingCounters = departmentCode
+		? counterData.filter((counter) => counter.departmentCode === departmentCode)
+		: [];
 	const options = [
-		`<option value="">Select available counter</option>`,
-		...DEFAULT_COUNTERS.map((counterName) => {
-			const busy = busyCounters.has(normalizeCounterName(counterName));
-			return `<option value="${escapeHtml(counterName)}" ${busy ? "disabled" : ""}>${escapeHtml(counterName)}${busy ? " · Busy" : " · Available"}</option>`;
+		`<option value="">${departmentCode ? "Select available counter" : "Select a department first"}</option>`,
+		...matchingCounters.map((counter) => {
+			const busy = busyCounters.has(normalizeCounterName(counter.name));
+			const unavailable = busy || counter.status !== "OPEN";
+			const label = busy ? "Busy" : counter.status === "OPEN" ? "Available" : counter.status;
+			return `<option value="${escapeHtml(counter.name)}" ${unavailable ? "disabled" : ""}>${escapeHtml(counter.name)} · ${escapeHtml(label)}</option>`;
 		})
 	];
 	elements.staffCounterSelect.innerHTML = options.join("");
-	if (currentValue && !busyCounters.has(normalizeCounterName(currentValue))) {
+	if (currentValue && matchingCounters.some((counter) => counter.name === currentValue)
+			&& !busyCounters.has(normalizeCounterName(currentValue))) {
 		elements.staffCounterSelect.value = currentValue;
 	}
 }
@@ -418,8 +447,8 @@ function renderStaffTicketList(tickets) {
 		<div class="queue-row" style="--row-index: ${index}; cursor: pointer;" title="Click to update status" data-jump-to-status="${escapeHtml(ticket.queueNumber)}">
 			<img class="dept-logo" src="${departmentLogo(ticket.departmentCode)}" alt="${escapeHtml(ticket.departmentName)} logo" loading="lazy">
 			<div>
-				<h3>${escapeHtml(ticket.queueNumber)} - ${escapeHtml(ticket.patientName)}</h3>
-				<p>${escapeHtml(ticket.departmentName)} · ${escapeHtml(ticket.priorityCategory)} · ${ticket.peopleAhead} ahead</p>
+				<h3>${escapeHtml(ticket.queueNumber)}</h3>
+				<p>${escapeHtml(ticket.departmentName)} · ${ticket.peopleAhead} ahead</p>
 				<p>${ticket.counterName ? escapeHtml(ticket.counterName) : "No counter assigned"}</p>
 			</div>
 			<div class="current-number">${escapeHtml(ticket.status)}</div>
@@ -438,11 +467,8 @@ function ticketSummary(ticket, heading) {
 			</div>
 		</div>
 		<div class="detail-grid">
-			${detailItem("Patient", ticket.patientName)}
 			${detailItem("Department", ticket.departmentName)}
-			${detailItem("Priority", ticket.priorityCategory)}
 			${detailItem("People Ahead", String(ticket.peopleAhead))}
-			${detailItem("Estimated Wait", formatEstimatedWait(ticket))}
 			${detailItem("Counter", ticket.counterName || "-")}
 			${detailItem("Called At", formatTime(ticket.calledAt))}
 			${detailItem("Completed At", formatTime(ticket.completedAt))}
@@ -455,7 +481,7 @@ function normalizeCounterName(value) {
 }
 
 function departmentLogo(code) {
-	return DEPARTMENT_LOGOS[code] || "/assets/hospital-logo.png?v=20260530-3";
+	return DEPARTMENT_LOGOS[code] || `${CONTEXT_PATH}/assets/hospital-logo.png?v=20260530-3`;
 }
 
 function detailItem(label, value) {

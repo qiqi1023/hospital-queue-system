@@ -1,4 +1,4 @@
-package com.hospital.queue.domain;
+package com.hospital.queue.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -12,37 +12,30 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "queue_tickets")
+@Table(name = "queue_tickets", uniqueConstraints = @jakarta.persistence.UniqueConstraint(columnNames = {"queue_number", "queue_date"}))
 public class QueueTicket {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	private Long databaseId;
-
-	@Column(nullable = false)
-	private long id;
+	private Long id;
 
 	@Column(nullable = false)
 	private String queueNumber;
 
+	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
-	private String patientName;
+	private IdentityType identityType;
 
-	@Column(nullable = false)
-	private String icNumber;
+	@Column(nullable = false, length = 20)
+	private String identityNumber;
+
+	@Column(nullable = false, length = 10)
+	private String phoneCountryCode;
 
 	@Column(nullable = false)
 	private String phoneNumber;
 
-	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
-	private Department department;
-
-	@Column(nullable = false)
-	private String visitReason;
-
-	@Enumerated(EnumType.STRING)
-	@Column(nullable = false)
-	private PriorityCategory priorityCategory;
+	private String departmentCode;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
@@ -62,31 +55,21 @@ public class QueueTicket {
 	protected QueueTicket() {
 	}
 
-	public QueueTicket(
-			long id,
-			String queueNumber,
-			String patientName,
-			String icNumber,
-			String phoneNumber,
-			Department department,
-			String visitReason,
-			PriorityCategory priorityCategory,
-			LocalDate queueDate,
-			LocalDateTime createdAt) {
-		this.id = id;
+	public QueueTicket(String queueNumber, IdentityType identityType, String identityNumber,
+			String phoneCountryCode, String phoneNumber, String departmentCode,
+			LocalDate queueDate, LocalDateTime createdAt) {
 		this.queueNumber = queueNumber;
-		this.patientName = patientName;
-		this.icNumber = icNumber;
+		this.identityType = identityType;
+		this.identityNumber = identityNumber;
+		this.phoneCountryCode = phoneCountryCode;
 		this.phoneNumber = phoneNumber;
-		this.department = department;
-		this.visitReason = visitReason;
-		this.priorityCategory = priorityCategory;
+		this.departmentCode = departmentCode;
 		this.status = QueueStatus.WAITING;
 		this.queueDate = queueDate;
 		this.createdAt = createdAt;
 	}
 
-	public long getId() {
+	public Long getId() {
 		return id;
 	}
 
@@ -94,29 +77,15 @@ public class QueueTicket {
 		return queueNumber;
 	}
 
-	public String getPatientName() {
-		return patientName;
-	}
-
-	public String getIcNumber() {
-		return icNumber;
-	}
+	public IdentityType getIdentityType() { return identityType; }
+	public String getIdentityNumber() { return identityNumber; }
+	public String getPhoneCountryCode() { return phoneCountryCode; }
 
 	public String getPhoneNumber() {
 		return phoneNumber;
 	}
 
-	public Department getDepartment() {
-		return department;
-	}
-
-	public String getVisitReason() {
-		return visitReason;
-	}
-
-	public PriorityCategory getPriorityCategory() {
-		return priorityCategory;
-	}
+	public String getDepartmentCode() { return departmentCode; }
 
 	public QueueStatus getStatus() {
 		return status;

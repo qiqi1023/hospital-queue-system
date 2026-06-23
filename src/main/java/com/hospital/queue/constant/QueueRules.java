@@ -1,6 +1,6 @@
 package com.hospital.queue.constant;
 
-import com.hospital.queue.domain.QueueStatus;
+import com.hospital.queue.model.QueueStatus;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.EnumMap;

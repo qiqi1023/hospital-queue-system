@@ -1,10 +1,14 @@
+<%@ page contentType="text/html; charset=UTF-8" pageEncoding="UTF-8" %>
+<%@ taglib prefix="c" uri="jakarta.tags.core" %>
 <!doctype html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="context-path" content="${pageContext.request.contextPath}">
+	<link rel="icon" href="data:,">
 	<title>Smart Hospital Queue · Staff Portal</title>
-	<link rel="stylesheet" href="/styles.css?v=20260530-13">
+	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260530-13">
 </head>
 <body>
 	<div class="topbar" aria-label="Hospital queue status">
@@ -13,7 +17,7 @@
 	</div>
 
 	<header class="app-header">
-		<img class="brand-logo" src="/assets/hospital-logo.png?v=20260530-3" alt="Public Hospital Malaysia logo">
+		<img class="brand-logo" src="${pageContext.request.contextPath}/assets/hospital-logo.png?v=20260530-3" alt="Public Hospital Malaysia logo">
 		<div class="brand-copy">
 			<p class="eyebrow">Hospital Awam Malaysia</p>
 			<h1>Staff Queue Portal</h1>
@@ -22,7 +26,7 @@
 			<span id="clock">--:--</span>
 			<span class="status-dot"></span>
 			<span>Hospital Staff</span>
-			<a class="portal-link" href="/">Patient Page</a>
+			<a class="portal-link" href="${pageContext.request.contextPath}/">Patient Page</a>
 		</div>
 	</header>
 
@@ -55,6 +59,9 @@
 						<span>Department</span>
 						<select name="departmentCode" id="staff-department-select" required>
 							<option value="">Select department</option>
+							<c:forEach items="${departments}" var="department">
+								<option value="<c:out value='${department.code}'/>"><c:out value="${department.name}"/> (<c:out value="${department.code}"/>)</option>
+							</c:forEach>
 						</select>
 					</label>
 					<label>
@@ -98,6 +105,9 @@
 						<span>Department</span>
 						<select name="department" class="department-select" required>
 							<option value="">Select department</option>
+							<c:forEach items="${departments}" var="department">
+								<option value="<c:out value='${department.code}'/>"><c:out value="${department.name}"/> (<c:out value="${department.code}"/>)</option>
+							</c:forEach>
 						</select>
 					</label>
 					<label>
@@ -129,6 +139,6 @@
 	</main>
 
 	<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-	<script src="/staff.js?v=20260530-13" defer></script>
+	<script src="${pageContext.request.contextPath}/staff.js?v=20260623-3" defer></script>
 </body>
 </html>

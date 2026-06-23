@@ -1,415 +1,190 @@
 package com.hospital.queue.service;
 
-import com.hospital.queue.constant.QueueRules;
-import com.hospital.queue.constant.ResponseMessages;
-import com.hospital.queue.domain.Department;
-import com.hospital.queue.domain.PriorityCategory;
-import com.hospital.queue.domain.QueueStatus;
-import com.hospital.queue.domain.QueueTicket;
-import com.hospital.queue.dto.CallNextRequest;
-import com.hospital.queue.dto.CounterServiceResponse;
-import com.hospital.queue.dto.CurrentQueueResponse;
-import com.hospital.queue.dto.DepartmentResponse;
-import com.hospital.queue.dto.QueueTicketResponse;
-import com.hospital.queue.dto.TakeQueueRequest;
-import com.hospital.queue.dto.UpdateTicketStatusRequest;
-import com.hospital.queue.repository.QueueTicketRepository;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-import org.springframework.http.HttpStatus;
+import com.hospital.queue.dto.*;
+import com.hospital.queue.exception.*;
+import com.hospital.queue.model.*;
+import com.hospital.queue.repository.*;
+import jakarta.persistence.criteria.Predicate;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import org.springframework.data.domain.*;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Transactional(readOnly = true)
 public class QueueService {
-	private static final Comparator<QueueTicket> QUEUE_ORDER = Comparator
-		.comparingInt((QueueTicket ticket) -> ticket.getPriorityCategory() == PriorityCategory.PRIORITY ? 0 : 1)
-		.thenComparing(QueueTicket::getId);
-
+	private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
+	private static final List<QueueStatus> ACTIVE = List.of(QueueStatus.WAITING, QueueStatus.CALLED, QueueStatus.SERVING);
+	private static final Map<QueueStatus, Set<QueueStatus>> TRANSITIONS = Map.of(
+		QueueStatus.WAITING, Set.of(QueueStatus.CANCELLED),
+		QueueStatus.CALLED, Set.of(QueueStatus.SERVING, QueueStatus.COMPLETED, QueueStatus.MISSED, QueueStatus.CANCELLED),
+		QueueStatus.SERVING, Set.of(QueueStatus.COMPLETED),
+		QueueStatus.COMPLETED, Set.of(), QueueStatus.MISSED, Set.of(QueueStatus.WAITING), QueueStatus.CANCELLED, Set.of());
+	private final QueueTicketRepo tickets;
+	private final DepartmentRepo departments;
+	private final CounterRepo counters;
+	private final IcStateRepo states;
+	private final PhoneCodeRepo phoneCodes;
 	private final Clock clock;
-	private final QueueTicketRepository ticketRepository;
-	private final AtomicLong idSequence = new AtomicLong(QueueRules.INITIAL_TICKET_ID);
-	private final List<QueueTicket> tickets = new ArrayList<>();
-	private final Map<Department, Integer> departmentSequences = new EnumMap<>(Department.class);
-	private LocalDate activeDate;
 
-	public QueueService(Clock clock, QueueTicketRepository ticketRepository) {
-		this.clock = clock;
-		this.ticketRepository = ticketRepository;
-		this.activeDate = LocalDate.now(clock);
-		for (Department department : Department.values()) {
-			departmentSequences.put(department, QueueRules.INITIAL_SEQUENCE);
-		}
-		loadTicketsForActiveDate();
+	public QueueService(QueueTicketRepo tickets, DepartmentRepo departments, CounterRepo counters,
+			IcStateRepo states, PhoneCodeRepo phoneCodes, Clock clock) {
+		this.tickets = tickets; this.departments = departments; this.counters = counters;
+		this.states = states; this.phoneCodes = phoneCodes; this.clock = clock;
 	}
 
-	public synchronized QueueTicketResponse takeQueue(TakeQueueRequest request) {
-		resetIfNewDay();
+	@Transactional
+	public QueueResponse takeQueue(TakeQueueRequest request) {
+		String code = normalizeCode(request.departmentCode());
+		Department department = departments.lockByCode(code).orElseThrow(() -> new NotFoundException("Department not found"));
 		LocalDateTime now = LocalDateTime.now(clock);
-		if (now.toLocalTime().isBefore(QueueRules.QUEUE_OPEN_TIME)) {
-			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.QUEUE_NOT_OPEN);
-		}
-		if (!now.toLocalTime().isBefore(QueueRules.QUEUE_CLOSE_TIME)) {
-			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.QUEUE_CLOSED);
-		}
-
-		Department department = parseDepartment(request.departmentCode());
-		String normalizedIc = normalizeIc(request.icNumber());
-		validateDailyQuota(department);
-		validateNoActiveDuplicate(normalizedIc, department);
-
-		int nextSequence = departmentSequences.compute(
-			department,
-			(key, value) -> value == null ? QueueRules.FIRST_SEQUENCE : value + QueueRules.FIRST_SEQUENCE
-		);
-		String queueNumber = department.name() + QueueRules.QUEUE_NUMBER_SEQUENCE_FORMAT.formatted(nextSequence);
-		QueueTicket ticket = new QueueTicket(
-			idSequence.getAndIncrement(),
-			queueNumber,
-			request.patientName().trim(),
-			normalizedIc,
-			request.phoneNumber().trim(),
-			department,
-			request.visitReason().trim(),
-			request.priorityCategory(),
-			activeDate,
-			now
-		);
-		tickets.add(ticket);
-		ticketRepository.save(ticket);
-
-		return toResponse(ticket);
+		if (now.toLocalTime().isBefore(department.getOpeningTime()) || !now.toLocalTime().isBefore(department.getClosingTime()))
+			throw new ConflictException("Online registration is currently closed. It is available from "
+				+ displayTime(department.getOpeningTime()) + " to " + displayTime(department.getClosingTime()) + ".");
+		String identity = validateIdentity(request.identityType(), request.identityNumber(), now.toLocalDate());
+		String dialCode = request.phoneCountryCode().trim();
+		if (!phoneCodes.existsByDialCode(dialCode)) throw new BadRequestException("Please select a valid country code.");
+		String phone = validatePhone(dialCode, request.phoneNumber());
+		if (tickets.existsByIdentityTypeAndIdentityNumberAndDepartmentCodeAndQueueDateAndStatusIn(
+			request.identityType(), identity, code, now.toLocalDate(), ACTIVE))
+			throw new ConflictException("You already have an active queue ticket for this department today.");
+		long used = tickets.countByDepartmentCodeAndQueueDate(code, now.toLocalDate());
+		if (used >= department.getDailyQuota())
+			throw new ConflictException("All queue numbers for this department have been taken today. Please try again tomorrow.");
+		String queueNumber = department.getPrefix() + "%03d".formatted(nextSequence(department, now.toLocalDate()));
+		QueueTicket ticket = tickets.save(new QueueTicket(queueNumber, request.identityType(), identity,
+			dialCode, phone, code, now.toLocalDate(), now));
+		return response(ticket, department);
 	}
 
-	public synchronized QueueTicketResponse getTicket(String queueNumber) {
-		resetIfNewDay();
-		return toResponse(findTicket(queueNumber));
+	public QueueResponse getTicket(String queueNumber) {
+		QueueTicket ticket = findToday(queueNumber);
+		return response(ticket, department(ticket.getDepartmentCode()));
 	}
 
-	public synchronized List<QueueTicketResponse> getTickets(String departmentCode, String statusCode) {
-		resetIfNewDay();
-		Department department = departmentCode == null || departmentCode.isBlank() ? null : parseDepartment(departmentCode);
-		QueueStatus status = statusCode == null || statusCode.isBlank() ? null : parseStatus(statusCode);
-
-		return tickets.stream()
-			.filter(ticket -> department == null || ticket.getDepartment() == department)
-			.filter(ticket -> status == null || ticket.getStatus() == status)
-			.sorted(QUEUE_ORDER)
-			.map(this::toResponse)
-			.toList();
+	public Page<QueueResponse> list(String departmentCode, QueueStatus status, LocalDate queueDate, Pageable pageable) {
+		String code = departmentCode == null || departmentCode.isBlank() ? null : normalizeCode(departmentCode);
+		if (code != null) department(code);
+		Specification<QueueTicket> spec = (root, query, cb) -> {
+			List<Predicate> predicates = new ArrayList<>();
+			if (code != null) predicates.add(cb.equal(root.get("departmentCode"), code));
+			if (status != null) predicates.add(cb.equal(root.get("status"), status));
+			if (queueDate != null) predicates.add(cb.equal(root.get("queueDate"), queueDate));
+			return cb.and(predicates.toArray(Predicate[]::new));
+		};
+		Map<String, Department> refs = new HashMap<>();
+		return tickets.findAll(spec, pageable).map(ticket -> response(ticket,
+			refs.computeIfAbsent(ticket.getDepartmentCode(), this::department)));
 	}
 
-	public synchronized QueueTicketResponse updateStatus(String queueNumber, UpdateTicketStatusRequest request) {
-		resetIfNewDay();
-		QueueTicket ticket = findTicket(queueNumber);
+	@Transactional
+	public QueueResponse callNext(CallRequest request) {
+		String code = normalizeCode(request.departmentCode());
+		Department department = departments.lockByCode(code).orElseThrow(() -> new NotFoundException("Department not found"));
 		LocalDateTime now = LocalDateTime.now(clock);
+		if (inBreak(department, now.toLocalTime()))
+			throw new ConflictException("The counter is currently on break. Service will resume at "
+				+ displayTime(department.getBreakEndTime()) + ".");
+		Counter counter = counters.findByNameIgnoreCase(request.counterName().trim())
+			.orElseThrow(() -> new NotFoundException("Counter not found"));
+		if (!counter.getDepartmentCode().equalsIgnoreCase(code)) throw new BadRequestException("Invalid counter");
+		if (counter.getStatus() != CounterStatus.OPEN) throw new ConflictException("This counter is currently unavailable. Please select another counter.");
+		if (tickets.existsByCounterNameIgnoreCaseAndQueueDateAndStatusIn(counter.getName(), now.toLocalDate(), ACTIVE))
+			throw new ConflictException("This counter is currently serving another patient. Please select another counter.");
+		QueueTicket ticket = tickets.findWaitingInCallOrder(code, now.toLocalDate(), QueueStatus.WAITING).stream().findFirst()
+			.orElseThrow(() -> new NotFoundException("Ticket not found"));
+		ticket.setStatus(QueueStatus.CALLED); ticket.setCounterName(counter.getName()); ticket.setCalledAt(now);
+		return response(tickets.save(ticket), department);
+	}
 
-		validateStatusTransition(ticket.getStatus(), request.status());
+	@Transactional
+	public QueueResponse updateStatus(String queueNumber, StatusRequest request) {
+		QueueTicket ticket = findToday(queueNumber);
+		QueueStatus previousStatus = ticket.getStatus();
+		if (!TRANSITIONS.getOrDefault(previousStatus, Set.of()).contains(request.status()))
+			throw new ConflictException("This ticket cannot be changed to the selected status.");
 		ticket.setStatus(request.status());
-		if (request.status() == QueueStatus.COMPLETED) {
-			ticket.setCompletedAt(now);
+		if (previousStatus == QueueStatus.MISSED && request.status() == QueueStatus.WAITING) {
+			ticket.setCounterName(null);
+			ticket.setCalledAt(LocalDateTime.now(clock));
 		}
-		ticketRepository.save(ticket);
-
-		return toResponse(ticket);
+		if (request.status() == QueueStatus.COMPLETED) ticket.setCompletedAt(LocalDateTime.now(clock));
+		return response(tickets.save(ticket), department(ticket.getDepartmentCode()));
 	}
 
-	public synchronized QueueTicketResponse cancelTicket(String queueNumber) {
-		resetIfNewDay();
-		QueueTicket ticket = findTicket(queueNumber);
-		validateStatusTransition(ticket.getStatus(), QueueStatus.CANCELLED);
-		ticket.setStatus(QueueStatus.CANCELLED);
-		ticketRepository.save(ticket);
-		return toResponse(ticket);
+	public List<CurrentQueueResponse> currentQueues(String requestedCode) {
+		LocalDate date = LocalDate.now(clock);
+		List<Department> list = requestedCode == null || requestedCode.isBlank()
+			? departments.findAll(Sort.by("code")) : List.of(department(normalizeCode(requestedCode)));
+		return list.stream().map(d -> {
+			QueueTicket current = tickets.findFirstByDepartmentCodeAndQueueDateAndStatusInOrderByCalledAtDesc(
+				d.getCode(), date, List.of(QueueStatus.CALLED, QueueStatus.SERVING)).orElse(null);
+			return new CurrentQueueResponse(d.getCode(), d.getName(), current == null ? null : current.getQueueNumber(),
+				current == null ? null : current.getCounterName(), current == null ? null : current.getStatus(),
+				tickets.countByDepartmentCodeAndQueueDateAndStatus(d.getCode(), date, QueueStatus.WAITING),
+				tickets.countByDepartmentCodeAndQueueDate(d.getCode(), date), d.getDailyQuota());
+		}).toList();
 	}
 
-	public synchronized QueueTicketResponse callNext(CallNextRequest request) {
-		resetIfNewDay();
-		LocalDateTime now = LocalDateTime.now(clock);
-		validateNotLunchBreak(now);
-
-		Department department = parseDepartment(request.departmentCode());
-		String counterName = request.counterName().trim();
-		validateCounterAvailable(counterName);
-
-		QueueTicket ticket = tickets.stream()
-			.filter(candidate -> candidate.getDepartment() == department)
-			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
-			.min(QUEUE_ORDER)
-			.orElseThrow(() -> new BusinessRuleException(
-				HttpStatus.NOT_FOUND,
-				ResponseMessages.NO_WAITING_TICKET.formatted(department.getDisplayName())
-			));
-
-		ticket.setStatus(QueueStatus.CALLED);
-		ticket.setCounterName(counterName);
-		ticket.setCalledAt(now);
-		ticketRepository.save(ticket);
-		return toResponse(ticket);
-	}
-
-	public synchronized List<CounterServiceResponse> getCurrentServices() {
-		resetIfNewDay();
-		return tickets.stream()
-			.filter(ticket -> ticket.getStatus() == QueueStatus.CALLED || ticket.getStatus() == QueueStatus.SERVING)
-			.sorted(Comparator
-				.comparing((QueueTicket ticket) -> ticket.getCounterName() == null ? "" : ticket.getCounterName(), String.CASE_INSENSITIVE_ORDER)
-				.thenComparing(QueueTicket::getId))
-			.map(ticket -> new CounterServiceResponse(
-				ticket.getCounterName(),
-				ticket.getQueueNumber(),
-				ticket.getPatientName(),
-				ticket.getDepartment().name(),
-				ticket.getDepartment().getDisplayName(),
-				ticket.getStatus(),
-				ticket.getCalledAt()
-			))
-			.toList();
-	}
-
-	public synchronized List<DepartmentResponse> getDepartments() {
-		return List.of(Department.values()).stream()
-			.map(department -> new DepartmentResponse(
-				department.name(),
-				department.getDisplayName(),
-				department.getDailyQuota()
-			))
-			.toList();
-	}
-
-	public synchronized List<CurrentQueueResponse> getCurrentQueues() {
-		resetIfNewDay();
-		return List.of(Department.values()).stream()
-			.map(department -> {
-				QueueTicket currentTicket = currentTicket(department);
-				return new CurrentQueueResponse(
-					department.name(),
-					department.getDisplayName(),
-					currentTicket == null ? null : currentTicket.getQueueNumber(),
-					currentTicket == null ? null : currentTicket.getCounterName(),
-					currentTicket == null ? null : currentTicket.getStatus(),
-					waitingCount(department),
-					usedSlots(department),
-					department.getDailyQuota()
-				);
-			})
-			.toList();
-	}
-
-	private QueueTicket findTicket(String queueNumber) {
-		return tickets.stream()
-			.filter(ticket -> ticket.getQueueNumber().equalsIgnoreCase(queueNumber))
-			.findFirst()
-			.orElseThrow(() -> new BusinessRuleException(HttpStatus.NOT_FOUND, ResponseMessages.QUEUE_NUMBER_NOT_FOUND));
-	}
-
-	private Department parseDepartment(String departmentCode) {
+	private String validateIdentity(IdentityType type, String value, LocalDate today) {
+		String identity = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+		if (type == IdentityType.NON_MALAYSIAN) {
+			if (!identity.matches("[A-Z0-9]{5,20}"))
+				throw new BadRequestException("Please enter a valid passport or foreign identity number.");
+			return identity;
+		}
+		if (identity.length() != 12) throw invalidIdentity();
+		if (!identity.matches("\\d{12}")) throw invalidIdentity();
 		try {
-			return Department.fromCode(departmentCode.trim());
+			int yy = Integer.parseInt(identity.substring(0, 2));
+			int year = yy <= today.getYear() % 100 ? 2000 + yy : 1900 + yy;
+			LocalDate birthDate = LocalDate.of(year, Integer.parseInt(identity.substring(2, 4)), Integer.parseInt(identity.substring(4, 6)));
+			if (birthDate.isAfter(today)) throw invalidIdentity();
+		} catch (DateTimeException | NumberFormatException ex) { throw invalidIdentity(); }
+		if (!states.existsById(identity.substring(6, 8))) throw invalidIdentity();
+		return identity;
+	}
+
+	private String validatePhone(String dialCode, String value) {
+		String phone = value == null ? "" : value.trim();
+		if (!phone.matches("\\d{4,15}")) throw invalidPhone();
+		if ("+60".equals(dialCode)) {
+			if (!phone.startsWith("0")) phone = "0" + phone;
+			if (!phone.matches("01\\d{8,9}")) throw invalidPhone();
 		}
-		catch (IllegalArgumentException ex) {
-			throw new BusinessRuleException(HttpStatus.BAD_REQUEST, ex.getMessage());
+		return phone;
+	}
+
+	private int nextSequence(Department department, LocalDate date) {
+		return tickets.findFirstByDepartmentCodeAndQueueDateOrderByIdDesc(department.getCode(), date)
+			.map(t -> Integer.parseInt(t.getQueueNumber().substring(department.getPrefix().length())) + 1).orElse(1);
+	}
+	private BadRequestException invalidIdentity() { return new BadRequestException("Please enter a valid identity or passport number."); }
+	private BadRequestException invalidPhone() { return new BadRequestException("Please enter a valid mobile number."); }
+	private String displayTime(LocalTime time) { return time.format(DISPLAY_TIME); }
+	private boolean inBreak(Department d, LocalTime time) { return d.getBreakStartTime() != null && d.getBreakEndTime() != null
+		&& !time.isBefore(d.getBreakStartTime()) && time.isBefore(d.getBreakEndTime()); }
+	private QueueTicket findToday(String number) { return tickets.findByQueueNumberIgnoreCaseAndQueueDate(number.trim(), LocalDate.now(clock))
+		.orElseThrow(() -> new NotFoundException("Ticket not found")); }
+	private Department department(String code) { return departments.findById(code)
+		.orElseThrow(() -> new NotFoundException("Department not found")); }
+	private String normalizeCode(String code) { return code.trim().toUpperCase(Locale.ROOT); }
+	private QueueResponse response(QueueTicket ticket, Department department) {
+		long ahead = 0;
+		if (ticket.getStatus() == QueueStatus.WAITING) {
+			List<QueueTicket> waiting = tickets.findWaitingInCallOrder(
+				ticket.getDepartmentCode(), ticket.getQueueDate(), QueueStatus.WAITING);
+			for (int index = 0; index < waiting.size(); index++) {
+				if (Objects.equals(waiting.get(index).getId(), ticket.getId())) {
+					ahead = index;
+					break;
+				}
+			}
 		}
-	}
-
-	private String normalizeIc(String icNumber) {
-		String normalized = icNumber.replaceAll(QueueRules.NON_DIGIT_REGEX, "");
-		if (normalized.length() != QueueRules.IC_DIGIT_COUNT) {
-			throw new BusinessRuleException(HttpStatus.BAD_REQUEST, ResponseMessages.INVALID_IC_NUMBER);
-		}
-		return normalized;
-	}
-
-	private void validateNotLunchBreak(LocalDateTime now) {
-		if (!now.toLocalTime().isBefore(QueueRules.LUNCH_BREAK_START_TIME)
-				&& now.toLocalTime().isBefore(QueueRules.LUNCH_BREAK_END_TIME)) {
-			throw new BusinessRuleException(HttpStatus.CONFLICT, ResponseMessages.LUNCH_BREAK_CALLING_PAUSED);
-		}
-	}
-
-
-	private void validateCounterAvailable(String counterName) {
-		tickets.stream()
-			.filter(ticket -> ticket.getCounterName() != null)
-			.filter(ticket -> ticket.getCounterName().equalsIgnoreCase(counterName))
-			.filter(ticket -> ticket.getStatus() == QueueStatus.CALLED || ticket.getStatus() == QueueStatus.SERVING)
-			.findFirst()
-			.ifPresent(ticket -> {
-				throw new BusinessRuleException(
-					HttpStatus.CONFLICT,
-					ResponseMessages.COUNTER_ALREADY_BUSY.formatted(counterName, ticket.getQueueNumber())
-				);
-			});
-	}
-
-	private void validateDailyQuota(Department department) {
-		int usedSlots = usedSlots(department);
-		if (usedSlots >= department.getDailyQuota()) {
-			throw new BusinessRuleException(
-				HttpStatus.CONFLICT,
-				ResponseMessages.DAILY_QUOTA_FULL.formatted(department.getDisplayName())
-			);
-		}
-	}
-
-	private void validateNoActiveDuplicate(String icNumber, Department department) {
-		tickets.stream()
-			.filter(ticket -> ticket.getDepartment() == department)
-			.filter(ticket -> ticket.getIcNumber().equals(icNumber))
-			.filter(ticket -> QueueRules.ACTIVE_STATUSES.contains(ticket.getStatus()))
-			.findFirst()
-			.ifPresent(ticket -> {
-				throw new BusinessRuleException(
-					HttpStatus.CONFLICT,
-					ResponseMessages.DUPLICATE_ACTIVE_IC.formatted(
-						department.getDisplayName(),
-						ticket.getQueueNumber()
-					)
-				);
-			});
-	}
-
-	private void validateStatusTransition(QueueStatus currentStatus, QueueStatus requestedStatus) {
-		if (!QueueRules.VALID_STATUS_TRANSITIONS.getOrDefault(currentStatus, java.util.Set.of()).contains(requestedStatus)) {
-			throw new BusinessRuleException(
-				HttpStatus.CONFLICT,
-				ResponseMessages.INVALID_STATUS_TRANSITION.formatted(currentStatus, requestedStatus)
-			);
-		}
-	}
-
-	private QueueStatus parseStatus(String statusCode) {
-		try {
-			return QueueStatus.valueOf(statusCode.trim().toUpperCase());
-		}
-		catch (IllegalArgumentException ex) {
-			throw new BusinessRuleException(HttpStatus.BAD_REQUEST, ResponseMessages.UNKNOWN_STATUS.formatted(statusCode));
-		}
-	}
-
-	private QueueTicketResponse toResponse(QueueTicket ticket) {
-		return new QueueTicketResponse(
-			ticket.getQueueNumber(),
-			ticket.getPatientName(),
-			ticket.getIcNumber(),
-			ticket.getPhoneNumber(),
-			ticket.getDepartment().name(),
-			ticket.getDepartment().getDisplayName(),
-			ticket.getVisitReason(),
-			ticket.getPriorityCategory(),
-			ticket.getStatus(),
-			ticket.getCounterName(),
-			peopleAhead(ticket),
-			estimatedWaitMinutes(ticket),
-			ticket.getQueueDate(),
-			ticket.getCreatedAt(),
-			ticket.getCalledAt(),
-			ticket.getCompletedAt()
-		);
-	}
-
-	private int peopleAhead(QueueTicket ticket) {
-		return (int) tickets.stream()
-			.filter(candidate -> candidate.getDepartment() == ticket.getDepartment())
-			.filter(candidate -> candidate.getStatus() == QueueStatus.WAITING)
-			.filter(candidate -> QUEUE_ORDER.compare(candidate, ticket) < 0)
-			.count();
-	}
-
-	private Integer estimatedWaitMinutes(QueueTicket ticket) {
-		if (ticket.getStatus() != QueueStatus.WAITING) {
-			return 0;
-		}
-
-		int averageServiceMinutes = averageServiceMinutes(ticket.getDepartment());
-		return peopleAhead(ticket) * averageServiceMinutes;
-	}
-
-	private int averageServiceMinutes(Department department) {
-		List<Long> serviceDurations = tickets.stream()
-			.filter(ticket -> ticket.getDepartment() == department)
-			.filter(ticket -> ticket.getCalledAt() != null && ticket.getCompletedAt() != null)
-			.map(ticket -> Duration.between(ticket.getCalledAt(), ticket.getCompletedAt()).toMinutes())
-			.filter(minutes -> minutes > 0)
-			.toList();
-
-		if (serviceDurations.isEmpty()) {
-			return QueueRules.DEFAULT_SERVICE_MINUTES;
-		}
-		double average = serviceDurations.stream()
-			.mapToLong(Long::longValue)
-			.average()
-			.orElse(0);
-		return (int) Math.ceil(average);
-	}
-
-	private QueueTicket currentTicket(Department department) {
-		return tickets.stream()
-			.filter(ticket -> ticket.getDepartment() == department)
-			.filter(ticket -> ticket.getStatus() == QueueStatus.SERVING || ticket.getStatus() == QueueStatus.CALLED)
-			.max(Comparator.comparing(QueueTicket::getId))
-			.orElse(null);
-	}
-
-	private int waitingCount(Department department) {
-		return (int) tickets.stream()
-			.filter(ticket -> ticket.getDepartment() == department)
-			.filter(ticket -> ticket.getStatus() == QueueStatus.WAITING)
-			.count();
-	}
-
-	private int usedSlots(Department department) {
-		return (int) tickets.stream()
-			.filter(ticket -> ticket.getDepartment() == department)
-			.filter(ticket -> QueueRules.QUOTA_COUNTED_STATUSES.contains(ticket.getStatus()))
-			.count();
-	}
-
-	private void resetIfNewDay() {
-		LocalDate today = LocalDate.now(clock);
-		if (!today.equals(activeDate)) {
-			activeDate = today;
-			loadTicketsForActiveDate();
-		}
-	}
-
-	private void loadTicketsForActiveDate() {
-		tickets.clear();
-		tickets.addAll(ticketRepository.findByQueueDateOrderByIdAsc(activeDate));
-		idSequence.set(nextTicketId());
-		departmentSequences.replaceAll((department, sequence) -> QueueRules.INITIAL_SEQUENCE);
-		tickets.forEach(ticket -> departmentSequences.merge(
-			ticket.getDepartment(),
-			sequenceNumber(ticket),
-			Math::max
-		));
-	}
-
-	private long nextTicketId() {
-		return tickets.stream()
-			.mapToLong(QueueTicket::getId)
-			.max()
-			.orElse(QueueRules.INITIAL_TICKET_ID - 1) + 1;
-	}
-
-	private int sequenceNumber(QueueTicket ticket) {
-		String prefix = ticket.getDepartment().name();
-		String queueNumber = ticket.getQueueNumber();
-		if (!queueNumber.startsWith(prefix)) {
-			return QueueRules.INITIAL_SEQUENCE;
-		}
-		try {
-			return Integer.parseInt(queueNumber.substring(prefix.length()));
-		}
-		catch (NumberFormatException ex) {
-			return QueueRules.INITIAL_SEQUENCE;
-		}
+		return new QueueResponse(ticket.getQueueNumber(), ticket.getDepartmentCode(), department.getName(), ticket.getStatus(),
+			ticket.getCounterName(), ahead, ticket.getQueueDate(), ticket.getCreatedAt(), ticket.getCalledAt(), ticket.getCompletedAt());
 	}
 }
