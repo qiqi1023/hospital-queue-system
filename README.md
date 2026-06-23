@@ -21,41 +21,56 @@ The **Smart Queue Management System** transitions these physical bottlenecks int
 
 ## 🏛️ System Architecture
 
-The application is structured following a strict **Layered Architecture Pattern** to ensure a clear separation of concerns among HTTP handling, business validation rules, data persistence, and data transport layers.
+The application uses a **Layered Architecture Pattern**. The web layer receives browser and REST API requests, the service layer applies queue business rules, and the repository layer stores and retrieves data using Spring Data JPA.
 
-
-```
-
-src/main/java/com/example/hospitalqueue
+```text
+src/main/java/com/hospital/queue
 │
-├── controller      # REST Controllers handling incoming HTTP requests
-│   ├── QueueTicketController.java
-│   └── QueueManagementController.java
+├── config          # Timezone and web/CORS configuration
+├── constant        # Shared API route names, messages, and queue rules
 │
-├── service         # Service Layer encapsulating core business logic
-│   ├── QueueTicketService.java
-│   └── QueueManagementService.java
+├── controller      # JSP page controller and REST API controllers
+│   ├── PageController.java
+│   ├── QueueController.java
+│   ├── QueueCallController.java
+│   └── RefDataController.java
 │
-├── repository      # Data Access Objects (DAO) interfacing with the database
-│   ├── QueueTicketRepository.java
-│   ├── DepartmentRepository.java
-│   └── CounterRepository.java
+├── service         # Core business logic for queue tickets and reference data
+│   ├── QueueService.java
+│   └── RefDataService.java
 │
-├── model           # Domain Entities representing database schemas
+├── repository      # Spring Data JPA repositories
+│   ├── QueueTicketRepo.java
+│   ├── DepartmentRepo.java
+│   ├── CounterRepo.java
+│   ├── PhoneCodeRepo.java
+│   └── IcStateRepo.java
+│
+├── model           # JPA entities and enums
 │   ├── QueueTicket.java
 │   ├── Department.java
 │   ├── Counter.java
-│   └── QueueStatus.java
+│   ├── QueueStatus.java
+│   ├── IdentityType.java
+│   └── DepartmentCode.java
 │
-├── dto             # Data Transfer Objects wrapping request/response payloads
-│   ├── QueueTicketRequest.java
-│   └── QueueTicketResponse.java
+├── dto             # Request and response DTO records
+│   ├── TakeQueueRequest.java
+│   ├── QueueResponse.java
+│   ├── CurrentQueueResponse.java
+│   ├── CallRequest.java
+│   ├── StatusRequest.java
+│   ├── ApiResponse.java
+│   └── ErrorResponse.java
 │
-└── exception       # Centralized Exception Handling definitions
-├── ResourceNotFoundException.java
-└── QueueClosedException.java
-
+└── exception       # Custom exceptions and global API error handling
+    ├── BadRequestException.java
+    ├── NotFoundException.java
+    ├── ConflictException.java
+    └── GlobalExceptionHandler.java
 ```
+
+The web pages are located in `src/main/webapp/WEB-INF/jsp`, and the JavaScript/CSS assets are located in `src/main/resources/static`.
 
 ---
 
@@ -80,46 +95,103 @@ To accurately mimic real-world hospital operational flows, the service layer enf
 
 ## 🚀 REST API Endpoints
 
-The system exposes the core functionalities as RESTful API web-services returning JSON payloads:
+The system exposes the core functionalities as RESTful API web-services returning JSON payloads. Most successful responses use this wrapper format:
 
-### 1. Take Queue Number Online (Required)
-* **Endpoint:** `POST /api/queue-tickets`
-* **Sample Request Body (`JSON`):**
 ```json
 {
-  "patientName": "Nur Aisyah",
-  "icNumber": "010203011234",
-  "phoneNumber": "01123456789",
-  "department": "General Consultation",
-  "visitReason": "Fever and cough"
+  "success": true,
+  "message": "Operation message",
+  "data": {}
 }
+```
 
+### 1. Take Queue Number Online (Required)
+
+* **Endpoint:** `POST /api/queueTickets`
+* **Sample Request Body (`JSON`):**
+
+```json
+{
+  "identityType": "MALAYSIAN",
+  "identityNumber": "010203011234",
+  "phoneCountryCode": "+60",
+  "phoneNumber": "01123456789",
+  "departmentCode": "GEN"
+}
 ```
 
 * **Sample Response Body (`JSON`):**
 
 ```json
 {
-  "ticketId": 1,
-  "queueNumber": "GEN001",
-  "patientName": "Nur Aisyah",
-  "department": "General Consultation",
-  "status": "WAITING",
-  "message": "Queue number successfully generated."
+  "success": true,
+  "message": "Queue number successfully generated",
+  "data": {
+    "queueNumber": "GEN001",
+    "departmentCode": "GEN",
+    "departmentName": "General Consultation",
+    "status": "WAITING",
+    "counterName": null,
+    "peopleAhead": 0,
+    "queueDate": "2026-06-24",
+    "createdAt": "2026-06-24T09:00:00",
+    "calledAt": null,
+    "completedAt": null
+  }
 }
-
 ```
 
 ### 2. View Current Queue Status (Required)
 
-* **Endpoint:** `GET /api/queues/current?department=General Consultation`
-* **Purpose:** Allows patients to view the current queue number being served for a department.
+* **Endpoint:** `GET /api/queues/current?departmentCode=GEN`
+* **Purpose:** Allows patients to view the current queue number being served for one department. If `departmentCode` is omitted, the API returns current queue information for all departments.
 
-### 3. Additional Endpoints for Full System Demo
+### 3. Search Ticket by Queue Number
 
-* `GET /api/queue-tickets/{queueNumber}` - Search ticket by queue number.
-* `PUT /api/queue-tickets/{queueNumber}/call` - Call next or selected queue ticket.
-* `PUT /api/queue-tickets/{queueNumber}/status` - Update ticket status.
+* **Endpoint:** `GET /api/queueTickets/{queueNumber}`
+* **Example:** `GET /api/queueTickets/GEN001`
+
+### 4. List Queue Tickets
+
+* **Endpoint:** `GET /api/queueTickets`
+* **Example:** `GET /api/queueTickets?departmentCode=GEN&status=WAITING&page=0&size=10&sort=createdAt,asc`
+
+Optional filters include `departmentCode`, `status`, `queueDate`, `page`, `size`, and `sort`.
+
+### 5. Call Next Patient
+
+* **Endpoint:** `POST /api/queueCalls`
+* **Sample Request Body (`JSON`):**
+
+```json
+{
+  "departmentCode": "GEN",
+  "counterName": "Counter 1"
+}
+```
+
+### 6. Update Ticket Status
+
+* **Endpoint:** `PATCH /api/queueTickets/{queueNumber}/status`
+* **Sample Request Body (`JSON`):**
+
+```json
+{
+  "status": "COMPLETED"
+}
+```
+
+Valid status values are `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `MISSED`, and `CANCELLED`.
+
+### 7. Reference Data Endpoints
+
+* `GET /api/departments` - Get all departments.
+* `GET /api/departments/{code}` - Get one department by code.
+* `GET /api/departments/{code}/queueTickets` - Get today's tickets for a department.
+* `GET /api/departments/{code}/counters` - Get counters for a department.
+* `GET /api/counters` - Get all counters.
+* `GET /api/phoneCodes` - Get supported phone country codes.
+* `GET /api/icStates` - Get Malaysian IC state codes.
 
 ---
 
@@ -233,7 +305,7 @@ http://localhost:8081
 ### Postman Testing
 
 1. Open your **Postman Client**.
-2. Set up a **POST** request targeting `http://localhost:8081/api/queue-tickets`.
+2. Set up a **POST** request targeting `http://localhost:8081/api/queueTickets`.
 3. Under the **Body** tab, select **raw** and set the format dropdown to **JSON**.
 4. Paste the example request payload detailed in the REST API section above and hit **Send**.
 
