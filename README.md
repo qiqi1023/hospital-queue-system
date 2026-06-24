@@ -283,6 +283,16 @@ spring.jpa.hibernate.show-sql=true
 
 ```
 
+### Database Schema and Initial Data Scripts
+
+The database structure and initial reference data are inserted manually through SQL scripts located in `src/main/resources`:
+
+* `schema.sql` - creates the required tables, constraints, and indexes.
+* `data.sql` - inserts initial records such as departments, counters, phone country codes, Malaysian IC state codes, and the demo admin/staff user.
+
+Before running the application, review these files if you need to change the seeded departments, counters, quotas, or admin login data. When using the default H2 configuration, Spring Boot loads these scripts during application startup so the demo data is ready for testing.
+
+
 ### Connect to Neon PostgreSQL
 
 This project has a `neon` Spring profile for your Neon database. Keep your Neon password in environment variables, not in `application.properties`.
