@@ -105,6 +105,41 @@ The system exposes the core functionalities as RESTful API web-services returnin
 }
 ```
 
+### Admin API Login and Bearer Token
+
+Use this endpoint in Postman to get an admin API access token before testing protected admin APIs such as queue calling and admin queue ticket listing.
+
+* **Endpoint:** `POST /api/admin/auth/login`
+* **Full URL:** `http://localhost:8081/api/admin/auth/login`
+* **Sample Request Body (`JSON`):**
+
+```json
+{
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+* **Sample Response Body (`JSON`):**
+
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "accessToken": "<generated-jwt-token>",
+    "tokenType": "Bearer",
+    "expiresIn": 3600
+  }
+}
+```
+
+In Postman, copy the value from `data.accessToken`, open the **Authorization** tab, choose **Bearer Token**, then paste the token into the **Token** field. Postman will send it as:
+
+```http
+Authorization: Bearer <generated-jwt-token>
+```
+
 ### 1. Take Queue Number Online (Required)
 
 * **Endpoint:** `POST /api/queueTickets`
@@ -296,22 +331,38 @@ Note: when the `neon` Spring profile is active, queue ticket data is saved to Ne
 
 ### Web Interface Access
 
-Once logs track a successful startup sequence, access the system's live front-end portal layout by opening your browser and heading to:
+Once logs track a successful startup sequence, access the system's live front-end pages using these URLs:
 
+```text
+Customer Portal: http://localhost:8081/customer
+Admin Login:     http://localhost:8081/admin/login
 ```
-http://localhost:8081
+
+Admin credentials for the assignment demo:
+
+```text
+Username: admin
+Password: admin123
 ```
+
+The root URL `http://localhost:8081` redirects to the customer portal.
 
 ### Postman Testing
 
 1. Open your **Postman Client**.
-2. Set up a **POST** request targeting `http://localhost:8081/api/queueTickets`.
+2. For customer queue registration, set up a **POST** request targeting `http://localhost:8081/api/queueTickets`.
 3. Under the **Body** tab, select **raw** and set the format dropdown to **JSON**.
 4. Paste the example request payload detailed in the REST API section above and hit **Send**.
+5. For admin API testing, send a **POST** request to `http://localhost:8081/api/admin/auth/login` using username `admin` and password `admin123`.
+6. From the login response, copy `data.accessToken`.
+7. Open the request's **Authorization** tab in Postman, select **Bearer Token**, and paste `data.accessToken` into the **Token** field before sending protected admin API requests.
 
 ---
 
-## 📝 Academic Integrity & Disclaimer
+## 📝 Academic Integrity & AI Assistance Disclosure
 
 * This system is developed as an assignment milestone for course **SECJ4383 Software Construction**.
-* All code contained in this repository has been independently developed and thoroughly understood by our group members in complete compliance with academic regulations.
+* AI assistance was used only to support documentation refinement, debugging guidance, task planning, and explanation of implementation concepts.
+* Any AI-assisted suggestions were reviewed, modified where necessary, tested, and understood by the group members before inclusion in the final submission.
+* The group members take full responsibility for the submitted source code, system design, testing results, and final documentation.
+* No AI-generated code is submitted without proper review, understanding, and disclosure.
