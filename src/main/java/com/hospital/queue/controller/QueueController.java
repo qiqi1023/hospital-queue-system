@@ -41,6 +41,8 @@ public class QueueController {
 		QueueStatus parsed = null;
 		try { if (status != null && !status.isBlank()) parsed = QueueStatus.valueOf(status.toUpperCase()); }
 		catch (IllegalArgumentException ex) { throw new BadRequestException("Please select a valid ticket status."); }
+		// Default to today's date if not provided
+		if (queueDate == null) queueDate = LocalDate.now();
 		return ApiResponse.ok("Tickets successfully retrieved", service.list(departmentCode, parsed, queueDate, PageRequest.of(page, size, Sort.by(direction, field))));
 	}
 	@PatchMapping(value="/{queueNumber}/status", consumes=MediaType.APPLICATION_JSON_VALUE)
