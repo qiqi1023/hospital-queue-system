@@ -8,7 +8,7 @@
 	<meta name="context-path" content="${pageContext.request.contextPath}">
 	<link rel="icon" href="data:,">
 	<title>Smart Hospital Queue · Admin Login</title>
-	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260624-1">
+	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260624-2">
 </head>
 <body class="staff-login-page">
 	<main class="staff-login-shell">
@@ -16,7 +16,7 @@
 			<div class="login-brand-copy">
 				<img src="${pageContext.request.contextPath}/assets/hospital-logo.png?v=20260530-3" alt="Public Hospital Malaysia logo">
 				<p class="eyebrow">Hospital Awam Malaysia</p>
-				<h1 id="login-brand-heading">Admin Queue Portal</h1>
+				<h1 id="login-brand-heading" class="login-portal-title">Admin Queue Portal</h1>
 				<p>Secure access for authorised hospital personnel managing patient queues and service counters.</p>
 			</div>
 			<div class="login-security-note">
@@ -31,9 +31,6 @@
 				<h2 id="staff-login-heading">Welcome back</h2>
 				<p class="login-intro">Enter your staff credentials to continue.</p>
 
-				<c:if test="${param.logout != null}">
-					<div class="login-alert success" role="status">You have signed out successfully.</div>
-				</c:if>
 				<c:if test="${not empty loginError}">
 					<div class="login-alert error" role="alert"><c:out value="${loginError}"/></div>
 				</c:if>
@@ -56,6 +53,10 @@
 			</div>
 		</section>
 	</main>
-	<script src="${pageContext.request.contextPath}/staff-login.js?v=20260624-1" defer></script>
+	<c:if test="${param.logout != null}">
+		<div id="login-toast" class="toast login-toast logout-toast" role="status" aria-live="polite"
+			data-logout-toast="true" data-message="You have signed out successfully." hidden></div>
+	</c:if>
+	<script src="${pageContext.request.contextPath}/staff-login.js?v=20260624-2" defer></script>
 </body>
 </html>
