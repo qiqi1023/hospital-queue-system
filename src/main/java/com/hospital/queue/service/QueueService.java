@@ -101,6 +101,26 @@ public class QueueService {
 	}
 
 	@Transactional
+	public QueueResponse callTicket(String queueNumber, CallTicketRequest request) {
+		QueueTicket ticket = tickets.findByQueueNumberIgnoreCaseAndQueueDate(queueNumber.trim(), LocalDate.now(clock))
+			.orElseThrow(() -> new NotFoundException("Ticket not found"));
+		if (ticket.getStatus() != QueueStatus.WAITING)
+			throw new ConflictException("Only waiting tickets can be called.");
+		Counter counter = counters.findByNameIgnoreCase(request.counterName().trim())
+			.orElseThrow(() -> new NotFoundException("Counter not found"));
+		if (!counter.getDepartmentCode().equalsIgnoreCase(ticket.getDepartmentCode()))
+			throw new BadRequestException("Invalid counter");
+		if (counter.getStatus() != CounterStatus.OPEN)
+			throw new ConflictException("This counter is currently unavailable. Please select another counter.");
+		if (tickets.existsByCounterNameIgnoreCaseAndQueueDateAndStatusIn(counter.getName(), LocalDate.now(clock), ACTIVE))
+			throw new ConflictException("This counter is currently serving another patient. Please select another counter.");
+		ticket.setStatus(QueueStatus.CALLED);
+		ticket.setCounterName(counter.getName());
+		ticket.setCalledAt(LocalDateTime.now(clock));
+		return response(tickets.save(ticket), department(ticket.getDepartmentCode()));
+	}
+
+	@Transactional
 	public QueueResponse updateStatus(String queueNumber, StatusRequest request) {
 		QueueTicket ticket = findToday(queueNumber);
 		QueueStatus previousStatus = ticket.getStatus();

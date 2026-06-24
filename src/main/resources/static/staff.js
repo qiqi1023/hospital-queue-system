@@ -8,11 +8,13 @@ const API = {
 	queues: `${CONTEXT_PATH}/api/queueTickets`,
 	ticket: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}`,
 	nextCall: `${CONTEXT_PATH}/api/queueCalls`,
+	callTicket: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}/call`,
 	updateStatus: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}/status`
 };
 
 let counterData = [];
 let activeServices = [];
+let pendingCallQueueNumber = null;
 
 const VALID_STATUS_ACTIONS = {
 	WAITING: [
@@ -65,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	bindStaffCallForm();
 	bindStatusLookupForm();
 	bindStatusWorkflowActions();
+	bindRedirectCall();
 	bindQueueListForm();
 	bindGlobalJumpToStatus();
 	startClock();
@@ -104,11 +107,23 @@ function bindStaffCallForm() {
 		const payload = Object.fromEntries(new FormData(elements.staffCallForm).entries());
 
 		try {
-			const ticket = await requestJson(API.nextCall, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
-			});
+			let ticket;
+			if (pendingCallQueueNumber) {
+				// Call the specific ticket that was selected from the status panel
+				ticket = await requestJson(API.callTicket(pendingCallQueueNumber), {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ counterName: payload.counterName })
+				});
+				// clear pending after successful call
+				pendingCallQueueNumber = null;
+			} else {
+				ticket = await requestJson(API.nextCall, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload)
+				});
+			}
 			renderStaffCallResult(ticket);
 			showToast(`Now calling ${ticket.queueNumber} at ${ticket.counterName}.`, "success");
 			await refreshStaffDashboard();
@@ -133,11 +148,54 @@ function bindStatusLookupForm() {
 
 function bindStatusWorkflowActions() {
 	elements.statusActionPanel.addEventListener("click", async (event) => {
-		const button = event.target.closest("[data-workflow-status-action]");
-		if (!button) {
+		const workflowButton = event.target.closest("[data-workflow-status-action]");
+		if (workflowButton) {
+			event.preventDefault();
+			await updateTicketStatus(workflowButton.dataset.queueNumber, workflowButton.dataset.workflowStatusAction);
 			return;
 		}
-		await updateTicketStatus(button.dataset.queueNumber, button.dataset.workflowStatusAction);
+
+		const callButton = event.target.closest("[data-call-ticket]");
+		if (callButton) {
+			event.preventDefault();
+			event.stopPropagation();
+			const queueNumber = callButton.dataset.queueNumber;
+			const counterSelect = document.querySelector("#status-action-panel select[data-counter-select]");
+			const counterName = counterSelect?.value || "";
+			await callTicket(queueNumber, counterName);
+		}
+	});
+}
+
+// Handle redirect action from status panel to Call Next panel
+function bindRedirectCall() {
+	elements.statusActionPanel.addEventListener("click", (event) => {
+		const redirect = event.target.closest("[data-redirect-call]");
+		if (!redirect) return;
+		event.preventDefault();
+		const dept = redirect.dataset.departmentCode;
+		const qnum = redirect.dataset.queueNumber;
+		const deptSelect = document.querySelector("#staff-department-select");
+		if (deptSelect) {
+			deptSelect.value = dept;
+			renderCounterOptions(activeServices);
+			// auto-select first available OPEN counter for the department
+			const busyCounters = new Set(activeServices.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
+			const matchingCounters = counterData.filter((counter) => counter.departmentCode === dept);
+			const available = matchingCounters.find((counter) => counter.status === "OPEN" && !busyCounters.has(normalizeCounterName(counter.name)));
+			const counterSelect = document.querySelector("#staff-counter-select");
+			if (available && counterSelect) {
+				counterSelect.value = available.name;
+			}
+		}
+		// store pending ticket so call-next form will call this ticket instead of oldest
+		pendingCallQueueNumber = qnum || null;
+		showStaffTab("call-next");
+		// focus the counter select on the call-next panel
+		setTimeout(() => {
+			const sel = document.querySelector("#staff-counter-select");
+			if (sel) sel.focus();
+		}, 50);
 	});
 }
 
@@ -150,6 +208,9 @@ function bindQueueListForm() {
 
 function bindGlobalJumpToStatus() {
 	document.addEventListener("click", async (event) => {
+		if (event.target.closest("button,select,input,textarea")) {
+			return;
+		}
 		const trigger = event.target.closest("[data-jump-to-status]");
 		if (!trigger) {
 			return;
@@ -202,6 +263,28 @@ async function updateTicketStatus(queueNumber, status) {
 		});
 		renderStatusTicket(ticket, "Ticket Updated");
 		showToast(`${ticket.queueNumber} updated to ${ticket.status}.`, "success");
+		await refreshStaffDashboard();
+		loadStaffTicketList();
+	}
+	catch (error) {
+		showToast(error.message, "error");
+	}
+}
+
+async function callTicket(queueNumber, counterName) {
+	if (!counterName) {
+		showToast("Please select a counter before calling the ticket.", "error");
+		return;
+	}
+
+	try {
+		const ticket = await requestJson(API.callTicket(queueNumber), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ counterName })
+		});
+		renderStatusTicket(ticket, "Ticket Called");
+		showToast(`Now calling ${ticket.queueNumber} at ${ticket.counterName}.`, "success");
 		await refreshStaffDashboard();
 		loadStaffTicketList();
 	}
@@ -354,7 +437,7 @@ function renderStatusTicket(ticket, heading = "Ticket Status") {
 function renderStatusWorkflowActions(ticket) {
 	const actions = VALID_STATUS_ACTIONS[ticket.status] || [];
 	elements.statusActionPanel.hidden = false;
-	if (!actions.length) {
+	if (!actions.length && ticket.status !== "WAITING") {
 		elements.statusActionPanel.innerHTML = `
 			<h3>No Further Action Required</h3>
 			<p class="muted-copy">${escapeHtml(ticket.queueNumber)} is already ${escapeHtml(ticket.status)}. This ticket has left the active queue.</p>
@@ -362,10 +445,12 @@ function renderStatusWorkflowActions(ticket) {
 		return;
 	}
 
+	const callTicketControls = ticket.status === "WAITING" ? renderCallTicketControls(ticket.departmentCode, ticket.queueNumber) : "";
 	elements.statusActionPanel.innerHTML = `
 		<h3>Available Actions for ${escapeHtml(ticket.queueNumber)}</h3>
 		<p class="muted-copy">Current status: <strong>${escapeHtml(ticket.status)}</strong></p>
 		<div class="ticket-actions">
+			${callTicketControls}
 			${actions.map((action) => `
 				<button class="${action.danger ? "danger-action" : "secondary-action"}" type="button"
 					data-workflow-status-action="${escapeHtml(action.status)}"
@@ -435,6 +520,17 @@ function renderCounterOptions(services) {
 			&& !busyCounters.has(normalizeCounterName(currentValue))) {
 		elements.staffCounterSelect.value = currentValue;
 	}
+}
+
+function renderCallTicketControls(departmentCode, queueNumber) {
+	// Instead of allowing selecting a counter here, redirect staff to the Call Next panel
+	// where they can choose a counter and perform the call. This prevents calling from
+	// the status panel and ensures consistent counter assignment flow.
+	return `
+		<div class="ticket-call-panel">
+			<button class="secondary-action" type="button" data-redirect-call data-department-code="${escapeHtml(departmentCode)}" data-queue-number="${escapeHtml(queueNumber)}">Call on Counter</button>
+		</div>
+	`;
 }
 
 function renderStaffTicketList(tickets) {

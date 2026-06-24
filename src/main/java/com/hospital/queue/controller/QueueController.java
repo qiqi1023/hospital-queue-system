@@ -45,6 +45,11 @@ public class QueueController {
 		if (queueDate == null) queueDate = LocalDate.now();
 		return ApiResponse.ok("Tickets successfully retrieved", service.list(departmentCode, parsed, queueDate, PageRequest.of(page, size, Sort.by(direction, field))));
 	}
+	@PostMapping(value="/{queueNumber}/call", consumes=MediaType.APPLICATION_JSON_VALUE)
+	public ApiResponse<QueueResponse> call(@PathVariable String queueNumber, @Valid @RequestBody CallTicketRequest request) {
+		return ApiResponse.ok("Ticket called", service.callTicket(queueNumber, request));
+	}
+
 	@PatchMapping(value="/{queueNumber}/status", consumes=MediaType.APPLICATION_JSON_VALUE)
 	public ApiResponse<QueueResponse> status(@PathVariable String queueNumber, @Valid @RequestBody StatusRequest request) {
 		return ApiResponse.ok("Status updated", service.updateStatus(queueNumber, request));
