@@ -4,7 +4,7 @@ const API = {
     departments: `${CONTEXT_PATH}/api/departments`,
     counters: `${CONTEXT_PATH}/api/counters`,
     currentQueues: `${CONTEXT_PATH}/api/queues/current`,
-    currentServices: `${CONTEXT_PATH}/api/queues/current`,
+    currentServices: `${CONTEXT_PATH}/api/queues/activeServices`,
     queues: `${CONTEXT_PATH}/api/queueTickets`,
     ticket: (queueNumber) => `${CONTEXT_PATH}/api/queueTickets/${encodeURIComponent(queueNumber)}`,
     nextCall: `${CONTEXT_PATH}/api/queueCalls`,
@@ -14,7 +14,9 @@ const API = {
 
 let counterData = [];
 let activeServices = [];
-let pendingCallQueueNumber = null;
+let departmentData = [];
+let currentQueueData = [];
+let lastDepartmentCallMarkup = "";
 
 const VALID_STATUS_ACTIONS = {
     WAITING: [
@@ -48,26 +50,23 @@ const elements = {
     clock: document.querySelector("#clock"),
     tabButtons: document.querySelectorAll("[data-staff-tab]"),
     tabPanels: document.querySelectorAll("[data-staff-panel]"),
-    staffCallForm: document.querySelector("#staff-call-form"),
+    departmentCallGrid: document.querySelector("#department-call-grid"),
     staffCallResult: document.querySelector("#staff-call-result"),
-    staffCounterSelect: document.querySelector("#staff-counter-select"),
     statusLookupForm: document.querySelector("#status-lookup-form"),
     statusUpdateResult: document.querySelector("#status-update-result"),
     statusActionPanel: document.querySelector("#status-action-panel"),
     queueListForm: document.querySelector("#queue-list-form"),
     staffTicketList: document.querySelector("#staff-ticket-list"),
     currentQueueList: document.querySelector("#current-queue-list"),
-    counterServiceBoard: document.querySelector("#counter-service-board"),
     toast: document.querySelector("#toast")
 };
 
 document.addEventListener("DOMContentLoaded", () => {
     document.body.classList.add("is-ready");
     bindStaffTabs();
-    bindStaffCallForm();
+    bindDepartmentCallCards();
     bindStatusLookupForm();
     bindStatusWorkflowActions();
-    bindRedirectCall();
     bindQueueListForm();
     bindGlobalJumpToStatus();
     startClock();
@@ -98,65 +97,31 @@ function showStaffTab(tabName) {
     }
 }
 
-function bindStaffCallForm() {
-    // UPDATED: Added auto-selection logic when the department dropdown changes
-    document.querySelector("#staff-department-select")?.addEventListener("change", (event) => {
-        const selectedDept = event.target.value;
-        
-        // 1. Re-render the options mapping first
-        renderCounterOptions(activeServices);
-        
-        if (!selectedDept) return;
+function bindDepartmentCallCards() {
+    elements.departmentCallGrid.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-call-next]");
+        if (!button || button.disabled) return;
 
-        // 2. Identify busy counter names
-        const busyCounters = new Set(
-            activeServices
-                .map((service) => normalizeCounterName(service.counterName))
-                .filter(Boolean)
-        );
-
-        // 3. Find first open and unassigned counter matching this department
-        const availableCounter = counterData.find((counter) => 
-            counter.departmentCode === selectedDept && 
-            counter.status === "OPEN" && 
-            !busyCounters.has(normalizeCounterName(counter.name))
-        );
-
-        // 4. Auto-select the value if a valid match is found
-        if (availableCounter && elements.staffCounterSelect) {
-            elements.staffCounterSelect.value = availableCounter.name;
-        }
-    });
-
-    elements.staffCallForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const payload = Object.fromEntries(new FormData(elements.staffCallForm).entries());
-
+        button.disabled = true;
+        button.textContent = "Calling…";
         try {
-            let ticket;
-            if (pendingCallQueueNumber) {
-                ticket = await requestJson(API.callTicket(pendingCallQueueNumber), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ counterName: payload.counterName })
-                });
-                pendingCallQueueNumber = null;
-            } else {
-                ticket = await requestJson(API.nextCall, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-            }
+            const ticket = await requestJson(API.nextCall, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    departmentCode: button.dataset.departmentCode,
+                    counterName: button.dataset.counterName
+                })
+            });
             renderStaffCallResult(ticket);
             showToast(`Now calling ${ticket.queueNumber} at ${ticket.counterName}.`, "success");
             await refreshStaffDashboard();
             loadStaffTicketList();
         }
         catch (error) {
-            elements.staffCallResult.hidden = false;
-            elements.staffCallResult.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
             showToast(error.message, "error");
+            lastDepartmentCallMarkup = "";
+            renderDepartmentCallCards();
         }
     });
 }
@@ -184,38 +149,8 @@ function bindStatusWorkflowActions() {
             event.preventDefault();
             event.stopPropagation();
             const queueNumber = callButton.dataset.queueNumber;
-            const counterSelect = document.querySelector("#status-action-panel select[data-counter-select]");
-            const counterName = counterSelect?.value || "";
-            await callTicket(queueNumber, counterName);
+            await callTicket(queueNumber, callButton.dataset.counterName);
         }
-    });
-}
-
-function bindRedirectCall() {
-    elements.statusActionPanel.addEventListener("click", (event) => {
-        const redirect = event.target.closest("[data-redirect-call]");
-        if (!redirect) return;
-        event.preventDefault();
-        const dept = redirect.dataset.departmentCode;
-        const qnum = redirect.dataset.queueNumber;
-        const deptSelect = document.querySelector("#staff-department-select");
-        if (deptSelect) {
-            deptSelect.value = dept;
-            renderCounterOptions(activeServices);
-            const busyCounters = new Set(activeServices.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
-            const matchingCounters = counterData.filter((counter) => counter.departmentCode === dept);
-            const available = matchingCounters.find((counter) => counter.status === "OPEN" && !busyCounters.has(normalizeCounterName(counter.name)));
-            const counterSelect = document.querySelector("#staff-counter-select");
-            if (available && counterSelect) {
-                counterSelect.value = available.name;
-            }
-        }
-        pendingCallQueueNumber = qnum || null;
-        showStaffTab("call-next");
-        setTimeout(() => {
-            const sel = document.querySelector("#staff-counter-select");
-            if (sel) sel.focus();
-        }, 50);
     });
 }
 
@@ -331,15 +266,17 @@ function updateClock() {
 async function loadDepartments() {
     try {
         const departments = await requestJson(API.departments);
+        departmentData = departments;
         const departmentOptions = [
             `<option value="">Select department</option>`,
             ...departments.map((department) =>
                 `<option value="${department.code}">${escapeHtml(department.name)} (${department.code})</option>`
             )
         ].join("");
-        document.querySelectorAll("#staff-department-select, .department-select").forEach((select) => {
+        document.querySelectorAll(".department-select").forEach((select) => {
             select.innerHTML = departmentOptions;
         });
+        renderDepartmentCallCards();
     }
     catch (error) {
         showToast(error.message, "error");
@@ -349,8 +286,7 @@ async function loadDepartments() {
 async function loadCounters() {
     try {
         counterData = await requestJson(API.counters);
-        renderCounterServiceBoard(activeServices);
-        renderCounterOptions(activeServices);
+        renderDepartmentCallCards();
     }
     catch (error) {
         showToast(error.message, "error");
@@ -385,29 +321,14 @@ async function loadStaffTicketList() {
 }
 
 async function refreshStaffDashboard() {
-    await Promise.all([loadCurrentQueues(), loadCurrentServices()]);
-}
+    const [queuesResult, servicesResult] = await Promise.allSettled([
+        requestJson(API.currentQueues),
+        requestJson(API.currentServices)
+    ]);
 
-async function loadCurrentServices() {
-    try {
-        const queues = await requestJson(API.currentServices);
-        activeServices = queues.filter((queue) => queue.currentQueueNumber).map((queue) => ({
-            counterName: queue.counterName, queueNumber: queue.currentQueueNumber,
-            departmentCode: queue.departmentCode, departmentName: queue.departmentName,
-            status: queue.status, calledAt: null
-        }));
-        renderCounterServiceBoard(activeServices);
-        renderCounterOptions(activeServices);
-    }
-    catch (error) {
-        elements.counterServiceBoard.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
-    }
-}
-
-async function loadCurrentQueues() {
-    try {
-        const queues = await requestJson(API.currentQueues);
-        elements.currentQueueList.innerHTML = queues.map((queue, index) => `
+    if (queuesResult.status === "fulfilled") {
+        currentQueueData = queuesResult.value;
+        elements.currentQueueList.innerHTML = currentQueueData.map((queue, index) => `
             <div class="queue-row" style="--row-index: ${index}${queue.currentQueueNumber ? '; cursor: pointer;' : ''}" ${queue.currentQueueNumber ? `title="Click to update status" data-jump-to-status="${escapeHtml(queue.currentQueueNumber)}"` : ''}>
                 <img class="dept-logo" src="${departmentLogo(queue.departmentCode)}" alt="${escapeHtml(queue.departmentName)} logo" loading="lazy">
                 <div>
@@ -419,9 +340,12 @@ async function loadCurrentQueues() {
             </div>
         `).join("");
     }
-    catch (error) {
-        elements.currentQueueList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+    else if (!currentQueueData.length) {
+        elements.currentQueueList.innerHTML = `<p>${escapeHtml(queuesResult.reason.message)}</p>`;
     }
+
+    if (servicesResult.status === "fulfilled") activeServices = servicesResult.value;
+    renderDepartmentCallCards();
 }
 
 async function requestJson(url, options = {}) {
@@ -445,7 +369,17 @@ function resolveErrorMessage(body, fallback) {
 
 function renderStaffCallResult(ticket) {
     elements.staffCallResult.hidden = false;
-    elements.staffCallResult.innerHTML = ticketSummary(ticket, "Now Calling");
+    elements.staffCallResult.dataset.jumpToStatus = ticket.queueNumber;
+    elements.staffCallResult.title = `Open ${ticket.queueNumber} status`;
+    elements.staffCallResult.innerHTML = `
+        <img src="${departmentLogo(ticket.departmentCode)}" alt="">
+        <div>
+            <span>Now calling</span>
+            <strong>${escapeHtml(ticket.queueNumber)}</strong>
+            <p>${escapeHtml(ticket.departmentName)} · ${escapeHtml(ticket.counterName)}</p>
+        </div>
+        <span class="status-pill">${escapeHtml(ticket.status)}</span>
+    `;
 }
 
 function renderStatusTicket(ticket, heading = "Ticket Status") {
@@ -480,72 +414,80 @@ function renderStatusWorkflowActions(ticket) {
     `;
 }
 
-function renderCounterServiceBoard(services) {
-    const servicesByCounter = new Map();
-    services.forEach((service) => {
-        const key = normalizeCounterName(service.counterName);
-        if (key) {
-            servicesByCounter.set(key, service);
-        }
-    });
+function renderDepartmentCallCards() {
+    if (!departmentData.length || !counterData.length) return;
 
-    elements.counterServiceBoard.innerHTML = counterData.map((counter, index) => {
-        const counterName = counter.name;
-        const service = servicesByCounter.get(normalizeCounterName(counterName));
-        if (!service) {
-            const isOpen = counter.status === "OPEN";
+    const servicesByCounter = new Map(activeServices
+        .filter((service) => service.counterName)
+        .map((service) => [normalizeCounterName(service.counterName), service]));
+    const queuesByDepartment = new Map(currentQueueData
+        .map((queue) => [queue.departmentCode, queue]));
+
+    const markup = departmentData.map((department, index) => {
+        const queue = queuesByDepartment.get(department.code);
+        const waitingCount = Number(queue?.waitingCount || 0);
+        const counters = counterData.filter((counter) => counter.departmentCode === department.code);
+        const counterRows = counters.length ? counters.map((counter) => {
+            const service = servicesByCounter.get(normalizeCounterName(counter.name));
+            const available = counter.status === "OPEN" && !service;
+            const status = service ? "BUSY" : available ? "AVAILABLE" : counter.status;
+            const disabled = !available || waitingCount === 0;
+            const buttonLabel = waitingCount === 0 ? "No patients waiting"
+                : available ? `Call next at ${counter.name}`
+                : service ? `${service.queueNumber} in service`
+                : "Counter unavailable";
             return `
-                <article class="counter-service-card ${isOpen ? "available" : ""}" style="--row-index: ${index}">
-                    <div class="counter-service-topline">
-                        <strong>${escapeHtml(counterName)}</strong>
-                        <span class="availability-pill">${escapeHtml(counter.status)}</span>
+                <div class="department-counter-row ${service ? "is-busy" : available ? "is-available" : "is-closed"}"
+                    ${service ? `data-jump-to-status="${escapeHtml(service.queueNumber)}" title="Open ${escapeHtml(service.queueNumber)}"` : ""}>
+                    <div class="department-counter-state">
+                        <strong>${escapeHtml(counter.name)}</strong>
+                        <span class="counter-state-pill ${status.toLowerCase()}">${escapeHtml(status)}</span>
+                        ${service ? `<small>${escapeHtml(service.queueNumber)} · ${escapeHtml(service.status)}</small>` : `<small>${available ? "Ready for the next patient" : "Not accepting patients"}</small>`}
                     </div>
-                    <div class="counter-ticket-number available-counter">${isOpen ? "Ready" : "Unavailable"}</div>
-                    <p>${escapeHtml(counter.departmentCode)} · No active patient assigned.</p>
-                </article>
-            `;
-        }
-        return `
-            <article class="counter-service-card" style="--row-index: ${index}; cursor: pointer;" title="Click to update status" data-jump-to-status="${escapeHtml(service.queueNumber)}">
-                <div class="counter-service-topline">
-                    <strong>${escapeHtml(service.counterName || counterName)}</strong>
-                    <span class="status-pill">${escapeHtml(service.status)}</span>
+                    <button class="call-counter-action" type="button" data-call-next
+                        data-department-code="${escapeHtml(department.code)}"
+                        data-counter-name="${escapeHtml(counter.name)}" ${disabled ? "disabled" : ""}>${escapeHtml(buttonLabel)}</button>
                 </div>
-                <div class="counter-ticket-number">${escapeHtml(service.queueNumber)}</div>
-                <p>${escapeHtml(service.departmentName)}</p>
-                <small>Called at ${formatTime(service.calledAt)}</small>
+            `;
+        }).join("") : `<p class="empty-state compact">No counters configured for this department.</p>`;
+
+        return `
+            <article class="department-call-card" style="--row-index: ${index}">
+                <header class="department-call-header">
+                    <img src="${departmentLogo(department.code)}" alt="" loading="lazy">
+                    <div>
+                        <span class="department-code">${escapeHtml(department.code)}</span>
+                        <h3>${escapeHtml(department.name)}</h3>
+                    </div>
+                    <div class="department-waiting-count">
+                        <strong>${waitingCount}</strong>
+                        <span>waiting</span>
+                    </div>
+                </header>
+                <div class="department-usage">${Number(queue?.usedSlots || 0)} of ${Number(queue?.dailyQuota || department.dailyQuota || 0)} daily slots used</div>
+                <div class="department-counter-list">${counterRows}</div>
             </article>
         `;
     }).join("");
-}
-
-function renderCounterOptions(services) {
-    const busyCounters = new Set(services.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
-    const currentValue = elements.staffCounterSelect.value;
-    const departmentCode = document.querySelector("#staff-department-select")?.value || "";
-    const matchingCounters = departmentCode
-        ? counterData.filter((counter) => counter.departmentCode === departmentCode)
-        : [];
-    const options = [
-        `<option value="">${departmentCode ? "Select available counter" : "Select a department first"}</option>`,
-        ...matchingCounters.map((counter) => {
-            const busy = busyCounters.has(normalizeCounterName(counter.name));
-            const unavailable = busy || counter.status !== "OPEN";
-            const label = busy ? "Busy" : counter.status === "OPEN" ? "Available" : counter.status;
-            return `<option value="${escapeHtml(counter.name)}" ${unavailable ? "disabled" : ""}>${escapeHtml(counter.name)} · ${escapeHtml(label)}</option>`;
-        })
-    ];
-    elements.staffCounterSelect.innerHTML = options.join("");
-    if (currentValue && matchingCounters.some((counter) => counter.name === currentValue)
-            && !busyCounters.has(normalizeCounterName(currentValue))) {
-        elements.staffCounterSelect.value = currentValue;
-    }
+    if (markup === lastDepartmentCallMarkup) return;
+    lastDepartmentCallMarkup = markup;
+    elements.departmentCallGrid.innerHTML = markup;
 }
 
 function renderCallTicketControls(departmentCode, queueNumber) {
+    const busyCounters = new Set(activeServices.map((service) => normalizeCounterName(service.counterName)).filter(Boolean));
+    const availableCounters = counterData.filter((counter) => counter.departmentCode === departmentCode
+        && counter.status === "OPEN" && !busyCounters.has(normalizeCounterName(counter.name)));
+    if (!availableCounters.length) {
+        return `<p class="muted-copy">No counters are currently available for this department.</p>`;
+    }
     return `
         <div class="ticket-call-panel">
-            <button class="secondary-action" type="button" data-redirect-call data-department-code="${escapeHtml(departmentCode)}" data-queue-number="${escapeHtml(queueNumber)}">Call on Counter</button>
+            ${availableCounters.map((counter) => `
+                <button class="secondary-action" type="button" data-call-ticket
+                    data-counter-name="${escapeHtml(counter.name)}"
+                    data-queue-number="${escapeHtml(queueNumber)}">Call at ${escapeHtml(counter.name)}</button>
+            `).join("")}
         </div>
     `;
 }

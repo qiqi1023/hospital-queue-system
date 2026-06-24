@@ -15,7 +15,8 @@ public class WebConfig implements WebMvcConfigurer {
 
 	@Override public void addInterceptors(InterceptorRegistry registry) {
 		registry.addInterceptor(staffAuthInterceptor)
-			.addPathPatterns("/admin", "/staff", "/staff.html", "/api/queueCalls/**", "/api/queueTickets");
+			.addPathPatterns("/admin", "/staff", "/staff.html", "/api/queueCalls/**",
+				"/api/queueTickets", "/api/queues/activeServices");
 	}
 
 	@Override public void addCorsMappings(CorsRegistry registry) {

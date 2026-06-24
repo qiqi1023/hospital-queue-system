@@ -8,7 +8,7 @@
 	<meta name="context-path" content="${pageContext.request.contextPath}">
 	<link rel="icon" href="data:,">
 	<title>Smart Hospital Queue · Admin Portal</title>
-	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260530-13">
+	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260624-2">
 </head>
 <body>
 	<div class="topbar" aria-label="Hospital queue status">
@@ -32,17 +32,7 @@
 		</div>
 	</header>
 
-	<main class="layout staff-layout">
-		<aside class="side-panel counter-board-panel" aria-labelledby="counter-service-board-heading">
-			<section class="staff-overview">
-				<div class="section-heading compact-heading">
-					<h2 id="counter-service-board-heading">Counter Service Board</h2>
-					<p class="panel-description">Shows which counter is calling or serving a ticket. Available counters can be assigned to the next patient.</p>
-				</div>
-				<div id="counter-service-board" class="counter-service-board board-grid" aria-live="polite"></div>
-			</section>
-		</aside>
-
+	<main class="layout staff-layout streamlined-staff-layout">
 		<section class="queue-workspace" aria-label="Staff queue functions">
 			<nav class="tabs" aria-label="Staff queue functions">
 				<button class="tab-button active" type="button" data-staff-tab="call-next">Call Next Patient</button>
@@ -53,29 +43,14 @@
 			<section id="call-next-panel" class="tab-panel active" data-staff-panel="call-next" aria-labelledby="call-next-heading">
 				<div class="section-heading">
 					<h2 id="call-next-heading">Call Patient and Assign Counter</h2>
-					<p>Call the earliest waiting ticket for a department and assign an available service counter.</p>
+					<p>Choose an available counter directly from a department card. Busy counters show the patient currently assigned.</p>
 				</div>
 
-				<form id="staff-call-form" class="form-grid">
-					<label>
-						<span>Department</span>
-						<select name="departmentCode" id="staff-department-select" required>
-							<option value="">Select department</option>
-							<c:forEach items="${departments}" var="department">
-								<option value="<c:out value='${department.code}'/>"><c:out value="${department.name}"/> (<c:out value="${department.code}"/>)</option>
-							</c:forEach>
-						</select>
-					</label>
-					<label>
-						<span>Available Counter</span>
-						<select name="counterName" id="staff-counter-select" required>
-							<option value="">Select available counter</option>
-						</select>
-					</label>
-					<button class="primary-action full" type="submit">Call Patient</button>
-				</form>
+				<article id="staff-call-result" class="recent-call-result" hidden aria-live="polite"></article>
 
-				<article id="staff-call-result" class="ticket-detail" hidden aria-live="polite"></article>
+				<div id="department-call-grid" class="department-call-grid" aria-live="polite">
+					<p class="empty-state">Loading departments and counters…</p>
+				</div>
 			</section>
 
 			<section id="update-status-panel" class="tab-panel" data-staff-panel="update-status" aria-labelledby="update-status-heading">
@@ -141,6 +116,6 @@
 	</main>
 
 	<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-	<script src="${pageContext.request.contextPath}/staff.js?v=20260623-3" defer></script>
+	<script src="${pageContext.request.contextPath}/staff.js?v=20260624-4" defer></script>
 </body>
 </html>

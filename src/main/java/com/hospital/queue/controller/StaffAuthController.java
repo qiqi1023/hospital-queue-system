@@ -25,11 +25,6 @@ public class StaffAuthController {
 		return "staff-login";
 	}
 
-	@GetMapping("/staff/login")
-	public String legacyLoginPage() {
-		return "redirect:/admin/login";
-	}
-
 	@PostMapping("/admin/login")
 	public String login(@RequestParam String username, @RequestParam String password,
 			HttpServletRequest request, Model model) {

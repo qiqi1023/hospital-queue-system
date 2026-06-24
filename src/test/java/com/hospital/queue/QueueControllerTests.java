@@ -64,6 +64,10 @@ class QueueControllerTests {
 		mvc.perform(post("/api/queueCalls").session(staff).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
 			.andExpect(status().isCreated()).andExpect(jsonPath("$.data.status", is("CALLED")));
+		mvc.perform(get("/api/queues/activeServices").session(staff))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data", hasSize(1)))
+			.andExpect(jsonPath("$.data[0].counterName", is("Counter 1")));
 		mvc.perform(patch("/api/queueTickets/GEN001/status").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"status\":\"COMPLETED\"}"))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.data.completedAt", notNullValue()));
@@ -135,7 +139,7 @@ class QueueControllerTests {
 	}
 
 	@Test void rejectsInvalidStaffCredentialsAndProtectsStaffApi() throws Exception {
-		mvc.perform(post("/admin/login").param("username", "staff").param("password", "wrong"))
+		mvc.perform(post("/admin/login").param("username", "admin").param("password", "wrong"))
 			.andExpect(status().isOk()).andExpect(view().name("staff-login"))
 			.andExpect(model().attribute("loginError", "Invalid admin ID or password."));
 		mvc.perform(post("/api/queueCalls").contentType(MediaType.APPLICATION_JSON)
@@ -147,7 +151,7 @@ class QueueControllerTests {
 	@Test void issuesBearerTokenForAdminApiAccess() throws Exception {
 		String loginResponse = mvc.perform(post("/api/admin/auth/login")
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"username\":\"staff\",\"password\":\"ChangeMe123!\"}"))
+				.content("{\"username\":\"admin\",\"password\":\"admin123\"}"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.tokenType", is("Bearer")))
 			.andExpect(jsonPath("$.data.expiresIn", is(3600)))
@@ -172,7 +176,7 @@ class QueueControllerTests {
 	@Test void rejectsInvalidAdminApiLogin() throws Exception {
 		mvc.perform(post("/api/admin/auth/login")
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"username\":\"staff\",\"password\":\"wrong\"}"))
+				.content("{\"username\":\"admin\",\"password\":\"wrong\"}"))
 			.andExpect(status().isUnauthorized())
 			.andExpect(jsonPath("$.message", is("Invalid admin ID or password.")))
 			.andExpect(jsonPath("$.data").value(nullValue()));
@@ -183,7 +187,7 @@ class QueueControllerTests {
 	}
 	private MockHttpSession staffSession() throws Exception {
 		return (MockHttpSession) mvc.perform(post("/admin/login")
-				.param("username", "staff").param("password", "ChangeMe123!"))
+				.param("username", "admin").param("password", "admin123"))
 			.andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin"))
 			.andReturn().getRequest().getSession(false);
 	}

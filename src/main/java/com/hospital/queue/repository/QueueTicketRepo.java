@@ -26,6 +26,8 @@ public interface QueueTicketRepo extends JpaRepository<QueueTicket, Long>, JpaSp
 	long countByDepartmentCodeAndQueueDateAndStatusAndIdLessThan(String departmentCode, LocalDate date, QueueStatus status, Long id);
 	Optional<QueueTicket> findFirstByDepartmentCodeAndQueueDateAndStatusInOrderByCalledAtDesc(
 		String departmentCode, LocalDate date, Collection<QueueStatus> statuses);
+	List<QueueTicket> findByQueueDateAndStatusInOrderByCounterNameAsc(
+		LocalDate date, Collection<QueueStatus> statuses);
 
 	Optional<QueueTicket> findFirstByDepartmentCodeAndQueueDateOrderByIdDesc(String code, LocalDate date);
 }

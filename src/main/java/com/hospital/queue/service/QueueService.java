@@ -149,6 +149,13 @@ public class QueueService {
 		}).toList();
 	}
 
+	public List<QueueResponse> activeServices() {
+		return tickets.findByQueueDateAndStatusInOrderByCounterNameAsc(
+				LocalDate.now(clock), List.of(QueueStatus.CALLED, QueueStatus.SERVING)).stream()
+			.map(ticket -> response(ticket, department(ticket.getDepartmentCode())))
+			.toList();
+	}
+
 	private String validateIdentity(IdentityType type, String value, LocalDate today) {
 		String identity = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
 		if (type == IdentityType.NON_MALAYSIAN) {

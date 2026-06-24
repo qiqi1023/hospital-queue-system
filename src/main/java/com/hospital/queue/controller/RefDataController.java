@@ -68,4 +68,9 @@ public class RefDataController {
 	public ApiResponse<?> current(@RequestParam(required = false) String departmentCode) {
 		return ApiResponse.ok("Current queues successfully retrieved", queues.currentQueues(departmentCode));
 	}
+
+	@GetMapping("/queues/activeServices")
+	public ApiResponse<?> activeServices() {
+		return ApiResponse.ok("Active counter services successfully retrieved", queues.activeServices());
+	}
 }
