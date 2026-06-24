@@ -11,6 +11,17 @@ const API = {
 
 const CURRENT_QUEUE_REFRESH_INTERVAL_MS = 30000;
 
+const VALIDATION_MESSAGES = {
+	requiredIdentityType: "Identity type is required",
+	invalidMyKad: "Enter a valid 12-digit MyKad number",
+	invalidIdentityNumber: "Invalid identity number",
+	invalidForeignIdentity: "Enter 5–20 passport or identity letters and numbers",
+	requiredCountryCode: "Country code is required",
+	invalidPhoneNumber: "Enter a valid phone number",
+	invalidMalaysianPhone: "Enter a valid Malaysian mobile number",
+	requiredDepartment: "Please select a department"
+};
+
 const DEPARTMENT_LOGOS = {
 	GEN: `${CONTEXT_PATH}/assets/departments/general-consult-logo.png?v=20260530-3`,
 	PHA: `${CONTEXT_PATH}/assets/departments/pharmacy-logo.png?v=20260530-3`,
@@ -85,9 +96,7 @@ function bindForms() {
 	elements.queueForm.addEventListener("submit", async (event) => {
 		event.preventDefault();
 		clearFormErrors();
-		const payload = Object.fromEntries(new FormData(elements.queueForm).entries());
-		payload.identityNumber = String(payload.identityNumber || "").replaceAll("-", "");
-		payload.phoneNumber = String(payload.phoneNumber || "").replace(/\D/g, "");
+		const payload = queueFormPayload();
 		if (!validateQueueForm(payload)) {
 			return;
 		}
@@ -229,8 +238,10 @@ function bindSmartInputs() {
 		elements.phoneNumber.value = "";
 		configureIdentityInput();
 		configurePhoneCountry();
-		clearFieldError("identityType");
+		validateField("identityType");
 		clearFieldError("identityNumber");
+		clearFieldError("phoneCountryCode");
+		clearFieldError("phoneNumber");
 	});
 
 	elements.identityNumber.addEventListener("input", () => {
@@ -243,7 +254,7 @@ function bindSmartInputs() {
 				.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 20);
 		}
 		updateIdentityMask();
-		clearFieldError("identityNumber");
+		validateField("identityNumber");
 	});
 	elements.identityNumber.addEventListener("focus", updateIdentityMask);
 	elements.identityNumber.addEventListener("blur", updateIdentityMask);
@@ -254,7 +265,7 @@ function bindSmartInputs() {
 			number = number.replace(/^0+/, "");
 		}
 		elements.phoneNumber.value = number.slice(0, 15);
-		clearFieldError("phoneNumber");
+		validateField("phoneNumber");
 	});
 	elements.phoneNumber.addEventListener("keydown", (event) => {
 		if (elements.identityType.value === "MALAYSIAN" && event.key === "0" && elements.phoneNumber.selectionStart === 0) {
@@ -263,10 +274,9 @@ function bindSmartInputs() {
 	});
 	elements.phoneCountryCode.addEventListener("change", () => {
 		updatePhoneCountry();
-		clearFieldError("phoneCountryCode");
-		clearFieldError("phoneNumber");
+		validateFields("phoneCountryCode", "phoneNumber");
 	});
-	elements.departmentSelect.addEventListener("change", () => clearFieldError("departmentCode"));
+	elements.departmentSelect.addEventListener("change", () => validateField("departmentCode"));
 	configureIdentityInput();
 	configurePhoneCountry();
 }
@@ -352,28 +362,63 @@ function formatMalaysianIdentity(digits) {
 }
 
 function validateQueueForm(payload) {
-	let valid = true;
-	if (!payload.identityType) valid = setFieldError("identityType", "Identity type is required");
-	if (payload.identityType === "MALAYSIAN" && !/^\d{12}$/.test(payload.identityNumber)) {
-		setFieldError("identityNumber", "Enter a valid 12-digit MyKad number"); valid = false;
-	}
-	else if (payload.identityType === "MALAYSIAN" && icStateCodes.size
-			&& !icStateCodes.has(payload.identityNumber.slice(6, 8))) {
-		setFieldError("identityNumber", "The MyKad state code is not valid"); valid = false;
-	}
-	if (payload.identityType === "NON_MALAYSIAN" && !/^[A-Z0-9]{5,20}$/.test(payload.identityNumber)) {
-		setFieldError("identityNumber", "Enter 5–20 passport or identity letters and numbers"); valid = false;
-	}
-	if (!payload.phoneCountryCode) { setFieldError("phoneCountryCode", "Country code is required"); valid = false; }
-	if (!/^\d{4,15}$/.test(payload.phoneNumber)) {
-		setFieldError("phoneNumber", "Enter a valid phone number"); valid = false;
-	}
-	else if (payload.phoneCountryCode === "+60" && !/^0?1\d{8,9}$/.test(payload.phoneNumber)) {
-		setFieldError("phoneNumber", "Enter a valid Malaysian mobile number"); valid = false;
-	}
-	if (!payload.departmentCode) { setFieldError("departmentCode", "Select a department"); valid = false; }
+	const valid = validateFields(
+		"identityType",
+		"identityNumber",
+		"phoneCountryCode",
+		"phoneNumber",
+		"departmentCode",
+		payload
+	);
 	if (!valid) elements.queueForm.querySelector(".has-error input, .has-error select")?.focus();
 	return valid;
+}
+
+function queueFormPayload() {
+	const payload = Object.fromEntries(new FormData(elements.queueForm).entries());
+	payload.identityNumber = String(payload.identityNumber || "").replaceAll("-", "");
+	payload.phoneNumber = String(payload.phoneNumber || "").replace(/\D/g, "");
+	return payload;
+}
+
+function getFieldError(field, payload = queueFormPayload()) {
+	const validators = {
+		identityType: () => payload.identityType ? "" : VALIDATION_MESSAGES.requiredIdentityType,
+		identityNumber: () => {
+			if (payload.identityType === "MALAYSIAN") {
+				if (!/^\d{12}$/.test(payload.identityNumber)) return VALIDATION_MESSAGES.invalidMyKad;
+				if (icStateCodes.size && !icStateCodes.has(payload.identityNumber.slice(6, 8))) {
+					return VALIDATION_MESSAGES.invalidIdentityNumber;
+				}
+			}
+			if (payload.identityType === "NON_MALAYSIAN" && !/^[A-Z0-9]{5,20}$/.test(payload.identityNumber)) {
+				return VALIDATION_MESSAGES.invalidForeignIdentity;
+			}
+			return "";
+		},
+		phoneCountryCode: () => payload.phoneCountryCode ? "" : VALIDATION_MESSAGES.requiredCountryCode,
+		phoneNumber: () => {
+			if (!/^\d{4,15}$/.test(payload.phoneNumber)) return VALIDATION_MESSAGES.invalidPhoneNumber;
+			if (payload.phoneCountryCode === "+60" && !/^0?1\d{8,9}$/.test(payload.phoneNumber)) {
+				return VALIDATION_MESSAGES.invalidMalaysianPhone;
+			}
+			return "";
+		},
+		departmentCode: () => payload.departmentCode ? "" : VALIDATION_MESSAGES.requiredDepartment
+	};
+	return validators[field]?.() || "";
+}
+
+function validateField(field, payload = queueFormPayload()) {
+	const message = getFieldError(field, payload);
+	if (message) return setFieldError(field, message);
+	clearFieldError(field);
+	return true;
+}
+
+function validateFields(...args) {
+	const payload = typeof args.at(-1) === "object" ? args.pop() : queueFormPayload();
+	return args.map((field) => validateField(field, payload)).every(Boolean);
 }
 
 function setFieldError(field, message) {
@@ -433,6 +478,7 @@ async function loadIcStates() {
 	try {
 		const states = await requestJson(API.icStates);
 		icStateCodes = new Set(states.map((state) => state.code));
+		if (elements.identityNumber.value) validateField("identityNumber");
 	}
 	catch (error) { showToast(error.message, "error"); }
 }
