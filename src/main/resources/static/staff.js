@@ -394,7 +394,7 @@ async function loadCurrentServices() {
         activeServices = queues.filter((queue) => queue.currentQueueNumber).map((queue) => ({
             counterName: queue.counterName, queueNumber: queue.currentQueueNumber,
             departmentCode: queue.departmentCode, departmentName: queue.departmentName,
-            status: queue.status, calledAt: null
+            status: queue.status, calledAt: queue.calledAt
         }));
         renderCounterServiceBoard(activeServices);
         renderCounterOptions(activeServices);
