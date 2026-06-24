@@ -7,8 +7,19 @@ import org.springframework.web.servlet.config.annotation.*;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 	@Value("${app.cors.allowed-origin:http://localhost:8081}") private String allowedOrigin;
+	private final StaffAuthInterceptor staffAuthInterceptor;
+
+	public WebConfig(StaffAuthInterceptor staffAuthInterceptor) {
+		this.staffAuthInterceptor = staffAuthInterceptor;
+	}
+
+	@Override public void addInterceptors(InterceptorRegistry registry) {
+		registry.addInterceptor(staffAuthInterceptor)
+			.addPathPatterns("/admin", "/staff", "/staff.html", "/api/queueCalls/**", "/api/queueTickets");
+	}
+
 	@Override public void addCorsMappings(CorsRegistry registry) {
 		registry.addMapping("/api/**").allowedOrigins(allowedOrigin)
-			.allowedMethods("GET", "POST", "PATCH").allowedHeaders("Content-Type").allowCredentials(false);
+			.allowedMethods("GET", "POST", "PATCH").allowedHeaders("Content-Type", "Authorization").allowCredentials(false);
 	}
 }

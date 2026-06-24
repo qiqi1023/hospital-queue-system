@@ -14,7 +14,17 @@ public class PageController {
 		this.refs = refs;
 	}
 
-	@GetMapping({ "/", "/index", "/index.html" })
+	@GetMapping("/")
+	public String home() {
+		return "redirect:/customer";
+	}
+
+	@GetMapping({ "/index", "/index.html" })
+	public String legacyCustomerPage() {
+		return "redirect:/customer";
+	}
+
+	@GetMapping("/customer")
 	public String patientPage(Model model) {
 		model.addAttribute("departments", refs.departments());
 		model.addAttribute("phoneCodes", refs.phoneCodes());
@@ -22,6 +32,11 @@ public class PageController {
 	}
 
 	@GetMapping({ "/staff", "/staff.html" })
+	public String legacyAdminPage() {
+		return "redirect:/admin";
+	}
+
+	@GetMapping("/admin")
 	public String staffPage(Model model) {
 		model.addAttribute("departments", refs.departments());
 		return "staff";

@@ -7,26 +7,28 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta name="context-path" content="${pageContext.request.contextPath}">
 	<link rel="icon" href="data:,">
-	<title>Smart Hospital Queue · Staff Portal</title>
+	<title>Smart Hospital Queue · Admin Portal</title>
 	<link rel="stylesheet" href="${pageContext.request.contextPath}/styles.css?v=20260530-13">
 </head>
 <body>
 	<div class="topbar" aria-label="Hospital queue status">
 		<span>Smart Queue · Public Hospital Malaysia</span>
-		<span>Staff Portal · Queue calling pauses from 12:00 PM to 2:00 PM</span>
+		<span>Admin Portal · Queue calling pauses from 12:00 PM to 2:00 PM</span>
 	</div>
 
 	<header class="app-header">
 		<img class="brand-logo" src="${pageContext.request.contextPath}/assets/hospital-logo.png?v=20260530-3" alt="Public Hospital Malaysia logo">
 		<div class="brand-copy">
 			<p class="eyebrow">Hospital Awam Malaysia</p>
-			<h1>Staff Queue Portal</h1>
+			<h1>Admin Queue Portal</h1>
 		</div>
 		<div class="header-status">
 			<span id="clock">--:--</span>
 			<span class="status-dot"></span>
-			<span>Hospital Staff</span>
-			<a class="portal-link" href="${pageContext.request.contextPath}/">Patient Page</a>
+			<span>Hospital Admin</span>
+			<form class="logout-form" action="${pageContext.request.contextPath}/admin/logout" method="post">
+				<button class="portal-link logout-button" type="submit">Sign out</button>
+			</form>
 		</div>
 	</header>
 

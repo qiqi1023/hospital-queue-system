@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.time.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -14,12 +15,14 @@ import org.springframework.context.annotation.*;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
 
 @SpringBootTest(properties="spring.datasource.url=jdbc:h2:mem:queue_${random.uuid}")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode=DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
 class QueueControllerTests {
 	@Autowired MockMvc mvc;
+	@Autowired ObjectMapper objectMapper;
 
 	@TestConfiguration static class ClockConfig {
 		@Bean @Primary Clock clock() {
@@ -56,8 +59,9 @@ class QueueControllerTests {
 	}
 
 	@Test void callsNextAndUpdatesStatus() throws Exception {
+		MockHttpSession staff = staffSession();
 		create(validMalaysian()).andExpect(status().isCreated());
-		mvc.perform(post("/api/queueCalls").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/queueCalls").session(staff).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
 			.andExpect(status().isCreated()).andExpect(jsonPath("$.data.status", is("CALLED")));
 		mvc.perform(patch("/api/queueTickets/GEN001/status").contentType(MediaType.APPLICATION_JSON)
@@ -66,13 +70,14 @@ class QueueControllerTests {
 	}
 
 	@Test void missedTicketCanReturnBehindPatientsAlreadyWaiting() throws Exception {
+		MockHttpSession staff = staffSession();
 		create(validMalaysian()).andExpect(status().isCreated())
 			.andExpect(jsonPath("$.data.queueNumber", is("GEN001")));
 		create(validMalaysian().replace("900101101234", "900101101235"))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.data.queueNumber", is("GEN002")));
 
-		mvc.perform(post("/api/queueCalls").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/queueCalls").session(staff).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.data.queueNumber", is("GEN001")));
@@ -85,7 +90,7 @@ class QueueControllerTests {
 			.andExpect(jsonPath("$.data.peopleAhead", is(1)))
 			.andExpect(jsonPath("$.data.counterName").value(nullValue()));
 
-		mvc.perform(post("/api/queueCalls").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/queueCalls").session(staff).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.data.queueNumber", is("GEN002")));
@@ -93,7 +98,7 @@ class QueueControllerTests {
 
 	@Test void supportsFilteringAndPagination() throws Exception {
 		create(validMalaysian()).andExpect(status().isCreated());
-		mvc.perform(get("/api/queueTickets").param("departmentCode","GEN").param("status","WAITING")
+		mvc.perform(get("/api/queueTickets").session(staffSession()).param("departmentCode","GEN").param("status","WAITING")
 			.param("queueDate","2026-06-24").param("page","0").param("size","10").param("sort","createdAt,asc"))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.data.content", hasSize(1)));
 	}
@@ -108,21 +113,79 @@ class QueueControllerTests {
 
 	@Test void rendersPatientJspWithDatabaseReferenceData() throws Exception {
 		mvc.perform(get("/"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(redirectedUrl("/customer"));
+		mvc.perform(get("/customer"))
 			.andExpect(status().isOk())
 			.andExpect(view().name("index"))
 			.andExpect(model().attribute("departments", hasSize(5)))
 			.andExpect(model().attribute("phoneCodes", hasSize(19)));
 	}
 
-	@Test void rendersStaffJspWithDatabaseDepartments() throws Exception {
-		mvc.perform(get("/staff"))
+	@Test void adminLoginProtectsPortalAndRendersDepartments() throws Exception {
+		mvc.perform(get("/admin"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(redirectedUrl("/admin/login"));
+		mvc.perform(get("/admin/login"))
 			.andExpect(status().isOk())
-			.andExpect(view().name("staff"))
+			.andExpect(view().name("staff-login"));
+		mvc.perform(get("/admin").session(staffSession()))
+			.andExpect(status().isOk()).andExpect(view().name("staff"))
 			.andExpect(model().attribute("departments", hasSize(5)));
+	}
+
+	@Test void rejectsInvalidStaffCredentialsAndProtectsStaffApi() throws Exception {
+		mvc.perform(post("/admin/login").param("username", "staff").param("password", "wrong"))
+			.andExpect(status().isOk()).andExpect(view().name("staff-login"))
+			.andExpect(model().attribute("loginError", "Invalid admin ID or password."));
+		mvc.perform(post("/api/queueCalls").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.message", is("Admin login required.")));
+	}
+
+	@Test void issuesBearerTokenForAdminApiAccess() throws Exception {
+		String loginResponse = mvc.perform(post("/api/admin/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"username\":\"staff\",\"password\":\"ChangeMe123!\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.tokenType", is("Bearer")))
+			.andExpect(jsonPath("$.data.expiresIn", is(3600)))
+			.andReturn().getResponse().getContentAsString();
+		String token = objectMapper.readTree(loginResponse).path("data").path("accessToken").asText();
+
+		create(validMalaysian()).andExpect(status().isCreated());
+		mvc.perform(post("/api/queueCalls")
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.data.status", is("CALLED")));
+
+		mvc.perform(post("/api/queueCalls")
+				.header("Authorization", "Bearer " + token + "tampered")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"departmentCode\":\"GEN\",\"counterName\":\"Counter 1\"}"))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test void rejectsInvalidAdminApiLogin() throws Exception {
+		mvc.perform(post("/api/admin/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"username\":\"staff\",\"password\":\"wrong\"}"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.message", is("Invalid admin ID or password.")))
+			.andExpect(jsonPath("$.data").value(nullValue()));
 	}
 
 	private org.springframework.test.web.servlet.ResultActions create(String body) throws Exception {
 		return mvc.perform(post("/api/queueTickets").contentType(MediaType.APPLICATION_JSON).content(body));
+	}
+	private MockHttpSession staffSession() throws Exception {
+		return (MockHttpSession) mvc.perform(post("/admin/login")
+				.param("username", "staff").param("password", "ChangeMe123!"))
+			.andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin"))
+			.andReturn().getRequest().getSession(false);
 	}
 	private String validMalaysian() { return """
 		{"identityType":"MALAYSIAN","identityNumber":"900101101234",

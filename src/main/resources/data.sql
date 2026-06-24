@@ -1,3 +1,9 @@
+-- Initial staff administrator.
+-- Username: staff; initial password: ChangeMe123! (stored below as a BCrypt cost-12 hash).
+INSERT INTO staff_users (username, password_hash, role, enabled, created_at)
+SELECT 'staff', '$2a$12$NjcUE2gOH4lWTLOUnPNn2ennC9Xzr0RaLwnpKcBY/7zTCi2ooc3Qu', 'ADMIN', TRUE, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM staff_users WHERE LOWER(username) = 'staff');
+
 -- Departments
 INSERT INTO departments
 (code, name, prefix, daily_quota, opening_time, closing_time, break_start_time, break_end_time)

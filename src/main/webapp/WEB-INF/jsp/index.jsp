@@ -26,7 +26,6 @@
 			<span id="clock">--:--</span>
 			<span class="status-dot"></span>
 			<span>Customer Queue</span>
-			<a class="portal-link" href="${pageContext.request.contextPath}/staff">Staff Portal</a>
 		</div>
 	</header>
 
