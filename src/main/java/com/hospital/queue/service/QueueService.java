@@ -144,6 +144,7 @@ public class QueueService {
 				d.getCode(), date, List.of(QueueStatus.CALLED, QueueStatus.SERVING)).orElse(null);
 			return new CurrentQueueResponse(d.getCode(), d.getName(), current == null ? null : current.getQueueNumber(),
 				current == null ? null : current.getCounterName(), current == null ? null : current.getStatus(),
+				current == null ? null : current.getCalledAt(),
 				tickets.countByDepartmentCodeAndQueueDateAndStatus(d.getCode(), date, QueueStatus.WAITING),
 				tickets.countByDepartmentCodeAndQueueDate(d.getCode(), date), d.getDailyQuota());
 		}).toList();
